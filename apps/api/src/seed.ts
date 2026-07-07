@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { Role, UserStatus } from '@prisma/client';
 import { prisma } from './db.js';
 import { env } from './env.js';
+import { KNOWN_FEATURES } from './services/features.js';
 import { syncClientMetrics } from './services/sync.js';
 import { slugify } from './utils/slug.js';
 
@@ -20,10 +21,10 @@ async function main() {
       name: 'Administrador',
       email: env.SEED_ADMIN_EMAIL.toLowerCase(),
       passwordHash: await bcrypt.hash(adminPassword, 12),
-      role: Role.ADMIN,
+      role: Role.COMPANY_ADMIN,
       status: UserStatus.ACTIVE
     },
-    update: { tenantId: tenant.id, role: Role.ADMIN, status: UserStatus.ACTIVE }
+    update: { tenantId: tenant.id, role: Role.COMPANY_ADMIN, status: UserStatus.ACTIVE }
   });
 
   const client = await prisma.client.upsert({
@@ -47,17 +48,25 @@ async function main() {
       name: 'Cliente R2R',
       email: 'cliente@r2rmarketingdigital.com.br',
       passwordHash: await bcrypt.hash('123456', 12),
-      role: Role.CLIENT,
+      role: Role.USER,
       status: UserStatus.ACTIVE
     },
-    update: { tenantId: tenant.id, clientId: client.id, role: Role.CLIENT, status: UserStatus.ACTIVE }
+    update: { tenantId: tenant.id, clientId: client.id, role: Role.USER, status: UserStatus.ACTIVE }
   });
 
   await prisma.clientUser.upsert({
     where: { clientId_userId: { clientId: client.id, userId: clientUser.id } },
-    create: { tenantId: tenant.id, clientId: client.id, userId: clientUser.id, role: Role.CLIENT },
-    update: { role: Role.CLIENT }
+    create: { tenantId: tenant.id, clientId: client.id, userId: clientUser.id, role: Role.USER },
+    update: { role: Role.USER }
   });
+
+  for (const featureName of KNOWN_FEATURES) {
+    await prisma.featureFlag.upsert({
+      where: { tenantId_featureName: { tenantId: tenant.id, featureName } },
+      create: { tenantId: tenant.id, featureName, enabled: true },
+      update: {}
+    });
+  }
 
   if (env.DEMO_MODE) {
     const to = new Date().toISOString().slice(0, 10);

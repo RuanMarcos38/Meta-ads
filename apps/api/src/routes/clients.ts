@@ -4,6 +4,7 @@ import { ClientStatus, Role, UserStatus } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth, requireRoles, resolveClientScope } from '../middleware/auth.js';
+import { ADMIN_ROLES, MANAGER_ROLES, canManageRole, isClientScopedRole } from '../services/accessControl.js';
 import { logAudit } from '../services/audit.js';
 import { slugify } from '../utils/slug.js';
 
@@ -29,7 +30,7 @@ async function uniqueClientSlug(tenantId: string, name: string, currentId?: stri
 
 export async function clientRoutes(app: FastifyInstance) {
   app.get('/clients', { preHandler: requireAuth }, async (request) => {
-    if (request.user!.role === Role.CLIENT) {
+    if (isClientScopedRole(request.user!.role)) {
       const client = await prisma.client.findFirst({ where: { id: request.user!.clientId ?? '', tenantId: request.user!.tenantId } });
       return { clients: client ? [client] : [] };
     }
@@ -40,7 +41,7 @@ export async function clientRoutes(app: FastifyInstance) {
     return { clients };
   });
 
-  app.post('/clients', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.post('/clients', { preHandler: requireRoles(MANAGER_ROLES) }, async (request) => {
     const body = clientInput.parse(request.body);
     const client = await prisma.client.create({
       data: {
@@ -69,7 +70,7 @@ export async function clientRoutes(app: FastifyInstance) {
     return { client: { ...client, integrations: client.integrations.map((item) => ({ ...item, accessTokenEncrypted: undefined, refreshTokenEncrypted: undefined })) } };
   });
 
-  app.patch('/clients/:id', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.patch('/clients/:id', { preHandler: requireRoles(MANAGER_ROLES) }, async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
     const body = clientInput.partial().parse(request.body);
     const existing = await prisma.client.findFirst({ where: { id: params.id, tenantId: request.user!.tenantId } });
@@ -85,7 +86,7 @@ export async function clientRoutes(app: FastifyInstance) {
     return { client };
   });
 
-  app.delete('/clients/:id', { preHandler: requireRoles([Role.ADMIN]) }, async (request, reply) => {
+  app.delete('/clients/:id', { preHandler: requireRoles(ADMIN_ROLES) }, async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
     const existing = await prisma.client.findFirst({ where: { id: params.id, tenantId: request.user!.tenantId } });
     if (!existing) return reply.code(404).send({ message: 'Cliente nao encontrado.' });
@@ -94,26 +95,29 @@ export async function clientRoutes(app: FastifyInstance) {
     return { client };
   });
 
-  app.post('/clients/:id/users', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.post('/clients/:id/users', { preHandler: requireRoles(MANAGER_ROLES) }, async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
     const body = z.object({
       name: z.string().min(2),
       email: z.string().email(),
       password: z.string().min(6),
-      role: z.enum(['CLIENT', 'MANAGER']).default('CLIENT')
+      role: z.nativeEnum(Role).default(Role.USER)
     }).parse(request.body);
+    if (!isClientScopedRole(body.role)) return reply.code(400).send({ message: 'Esta rota cria apenas usuarios comuns vinculados ao cliente.' });
+    if (!canManageRole(request.user!.role, body.role)) return reply.code(403).send({ message: 'Permissao insuficiente para criar este perfil.' });
+
     const client = await prisma.client.findFirst({ where: { id: params.id, tenantId: request.user!.tenantId } });
     if (!client) return reply.code(404).send({ message: 'Cliente nao encontrado.' });
     const user = await prisma.user.create({
       data: {
         tenantId: request.user!.tenantId,
-        clientId: body.role === 'CLIENT' ? client.id : null,
+        clientId: client.id,
         name: body.name,
         email: body.email.toLowerCase(),
         passwordHash: await bcrypt.hash(body.password, 12),
-        role: body.role as Role,
+        role: body.role,
         status: UserStatus.ACTIVE,
-        clientLinks: { create: { tenantId: request.user!.tenantId, clientId: client.id, role: body.role as Role } }
+        clientLinks: { create: { tenantId: request.user!.tenantId, clientId: client.id, role: body.role } }
       }
     });
     await logAudit({ tenantId: request.user!.tenantId, userId: request.user!.sub, action: 'user.create-client', entity: 'user', entityId: user.id });

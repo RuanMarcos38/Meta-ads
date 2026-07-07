@@ -7,8 +7,9 @@ O frontend aprovado da Hostinger foi preservado em `apps/web`. O backend fica em
 ## O que esta incluido
 
 - Autenticacao JWT com senha criptografada.
-- Perfis `ADMIN`, `MANAGER` e `CLIENT`.
+- Perfis `SUPER_ADMIN`, `COMPANY_ADMIN`, `MANAGER` e `USER`, com compatibilidade para `ADMIN` e `CLIENT`.
 - Isolamento por `tenantId` e `clientId`.
+- Feature flags por empresa para `integrations`, `reports` e `sync`.
 - Cadastro de clientes, usuarios e contas de anuncio.
 - Dashboard com resumo, diarios, campanhas, distribuicao por plataforma e saude.
 - Exportacao CSV e PDF.
@@ -102,4 +103,4 @@ window.APP_CONFIG = {
 
 Meta Ads e Google Ads dependem de apps oficiais, tokens e aprovacao de API. Sem essas credenciais, os endpoints ficam preparados e o modo demo pode ser ligado apenas para validacao visual.
 
-Mais detalhes em `README-BACKEND.md` e `docs/DEPLOY-HOSTINGER.md`.
+Mais detalhes em `README-BACKEND.md`, `docs/DEPLOY-HOSTINGER.md` e `docs/SECURITY-AUDIT.md`.

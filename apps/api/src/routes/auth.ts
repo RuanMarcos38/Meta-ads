@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { requireAuth, signToken } from '../middleware/auth.js';
+import { ADMIN_ROLES } from '../services/accessControl.js';
 import { logAudit } from '../services/audit.js';
 import { randomToken, sha256 } from '../utils/crypto.js';
 import { slugify } from '../utils/slug.js';
@@ -41,7 +42,7 @@ export async function authRoutes(app: FastifyInstance) {
       password: z.string().min(6)
     }).parse(request.body);
 
-    const existingAdmin = await prisma.user.count({ where: { role: Role.ADMIN } });
+    const existingAdmin = await prisma.user.count({ where: { role: { in: ADMIN_ROLES } } });
     if (existingAdmin > 0) return reply.code(409).send({ message: 'Bootstrap bloqueado: ja existe administrador cadastrado.' });
 
     const passwordHash = await bcrypt.hash(body.password, 12);
@@ -52,7 +53,7 @@ export async function authRoutes(app: FastifyInstance) {
         name: body.name,
         email: body.email.toLowerCase(),
         passwordHash,
-        role: Role.ADMIN
+        role: Role.SUPER_ADMIN
       }
     });
     await logAudit({ tenantId: tenant.id, userId: user.id, action: 'auth.bootstrap', entity: 'tenant', entityId: tenant.id });
@@ -71,8 +72,8 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.get('/auth/me', { preHandler: requireAuth }, async (request) => {
-    const user = await prisma.user.findUnique({
-      where: { id: request.user!.sub },
+    const user = await prisma.user.findFirst({
+      where: { id: request.user!.sub, tenantId: request.user!.tenantId },
       select: {
         id: true,
         tenantId: true,
@@ -89,8 +90,8 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.get('/me', { preHandler: requireAuth }, async (request) => {
-    const user = await prisma.user.findUnique({
-      where: { id: request.user!.sub },
+    const user = await prisma.user.findFirst({
+      where: { id: request.user!.sub, tenantId: request.user!.tenantId },
       select: { id: true, tenantId: true, clientId: true, name: true, email: true, role: true, status: true }
     });
     return { user };
@@ -133,7 +134,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.patch('/auth/change-password', { preHandler: requireAuth }, async (request, reply) => {
     const body = z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(6) }).parse(request.body);
-    const user = await prisma.user.findUnique({ where: { id: request.user!.sub } });
+    const user = await prisma.user.findFirst({ where: { id: request.user!.sub, tenantId: request.user!.tenantId } });
     if (!user || !(await bcrypt.compare(body.currentPassword, user.passwordHash))) {
       return reply.code(401).send({ message: 'Senha atual invalida.' });
     }

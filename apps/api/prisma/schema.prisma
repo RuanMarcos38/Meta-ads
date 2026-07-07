@@ -8,6 +8,9 @@ datasource db {
 }
 
 enum Role {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+  USER
   ADMIN
   MANAGER
   CLIENT
@@ -64,6 +67,7 @@ model Tenant {
   goals               DashboardGoal[]
   reportExports       ReportExport[]
   auditLogs           AuditLog[]
+  featureFlags        FeatureFlag[]
   passwordResetTokens PasswordResetToken[]
   createdAt           DateTime             @default(now()) @map("created_at")
   updatedAt           DateTime             @updatedAt @map("updated_at")
@@ -78,7 +82,7 @@ model User {
   name                String
   email               String               @unique
   passwordHash        String               @map("password_hash")
-  role                Role                 @default(CLIENT)
+  role                Role                 @default(USER)
   status              UserStatus           @default(ACTIVE)
   lastLoginAt         DateTime?            @map("last_login_at")
   tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -130,7 +134,7 @@ model ClientUser {
   tenantId  String   @map("tenant_id")
   clientId  String   @map("client_id")
   userId    String   @map("user_id")
-  role      Role     @default(CLIENT)
+  role      Role     @default(USER)
   client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now()) @map("created_at")
@@ -429,6 +433,20 @@ model AuditLog {
   @@index([userId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  featureName String   @map("feature_name")
+  enabled     Boolean  @default(true)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, featureName])
+  @@index([tenantId])
+  @@map("feature_flags")
 }
 
 model PasswordResetToken {

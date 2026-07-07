@@ -1,9 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { Platform, Role } from '@prisma/client';
+import { Platform } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth, requireRoles, resolveClientScope } from '../middleware/auth.js';
+import { MANAGER_ROLES } from '../services/accessControl.js';
 import { logAudit } from '../services/audit.js';
+import { requireFeature } from '../services/features.js';
+import { assertTenantClient } from '../services/tenantScope.js';
 
 const adAccountSchema = z.object({
   clientId: z.string(),
@@ -16,7 +19,7 @@ const adAccountSchema = z.object({
 });
 
 export async function adAccountRoutes(app: FastifyInstance) {
-  app.get('/ad-accounts', { preHandler: requireAuth }, async (request) => {
+  app.get('/ad-accounts', { preHandler: [requireAuth, requireFeature('integrations')] }, async (request) => {
     const query = z.object({ clientId: z.string().optional(), platform: z.nativeEnum(Platform).optional() }).parse(request.query);
     const clientId = await resolveClientScope(request, query.clientId);
     const accounts = await prisma.adAccount.findMany({
@@ -30,7 +33,7 @@ export async function adAccountRoutes(app: FastifyInstance) {
     return { accounts };
   });
 
-  app.post('/ad-accounts', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.post('/ad-accounts', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request, reply) => {
     const body = adAccountSchema.parse(request.body);
     const client = await prisma.client.findFirst({ where: { id: body.clientId, tenantId: request.user!.tenantId } });
     if (!client) return reply.code(404).send({ message: 'Cliente nao encontrado.' });
@@ -43,17 +46,18 @@ export async function adAccountRoutes(app: FastifyInstance) {
     return { account };
   });
 
-  app.patch('/ad-accounts/:id', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.patch('/ad-accounts/:id', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
     const body = adAccountSchema.partial().parse(request.body);
     const existing = await prisma.adAccount.findFirst({ where: { id: params.id, tenantId: request.user!.tenantId } });
     if (!existing) return reply.code(404).send({ message: 'Conta de anuncio nao encontrada.' });
+    if (body.clientId) await assertTenantClient(request.user!.tenantId, body.clientId);
     const account = await prisma.adAccount.update({ where: { id: existing.id }, data: body });
     await logAudit({ tenantId: request.user!.tenantId, userId: request.user!.sub, action: 'ad-account.update', entity: 'ad_account', entityId: account.id });
     return { account };
   });
 
-  app.delete('/ad-accounts/:id', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.delete('/ad-accounts/:id', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
     const existing = await prisma.adAccount.findFirst({ where: { id: params.id, tenantId: request.user!.tenantId } });
     if (!existing) return reply.code(404).send({ message: 'Conta de anuncio nao encontrada.' });

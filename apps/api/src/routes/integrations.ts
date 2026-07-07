@@ -1,10 +1,12 @@
 import jwt from 'jsonwebtoken';
 import type { FastifyInstance } from 'fastify';
-import { IntegrationStatus, Platform, Role } from '@prisma/client';
+import { IntegrationStatus, Platform } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { requireRoles } from '../middleware/auth.js';
+import { MANAGER_ROLES } from '../services/accessControl.js';
+import { isFeatureEnabled, requireFeature } from '../services/features.js';
 import { logAudit } from '../services/audit.js';
 import { exchangeGoogleCode, googleAuthUrl, listGoogleAccessibleCustomers } from '../services/googleAds.js';
 import { exchangeMetaCode, listMetaAdAccounts, metaAuthUrl } from '../services/metaAds.js';
@@ -37,8 +39,9 @@ async function assertClient(tenantId: string, clientId: string) {
 }
 
 export async function integrationRoutes(app: FastifyInstance) {
-  app.get('/integrations', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.get('/integrations', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request) => {
     const query = z.object({ clientId: z.string().optional(), platform: z.nativeEnum(Platform).optional() }).parse(request.query);
+    if (query.clientId) await assertClient(request.user!.tenantId, query.clientId);
     const integrations = await prisma.integration.findMany({
       where: {
         tenantId: request.user!.tenantId,
@@ -51,7 +54,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     return { integrations: integrations.map(publicIntegration) };
   });
 
-  app.post('/integrations/token', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.post('/integrations/token', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request) => {
     const body = z.object({
       clientId: z.string(),
       platform: z.nativeEnum(Platform),
@@ -77,7 +80,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     return { integration: publicIntegration(integration) };
   });
 
-  app.get('/integrations/meta/auth-url', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.get('/integrations/meta/auth-url', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request) => {
     const query = z.object({ clientId: z.string() }).parse(request.query);
     await assertClient(request.user!.tenantId, query.clientId);
     return { url: metaAuthUrl(signState({ tenantId: request.user!.tenantId, clientId: query.clientId, userId: request.user!.sub, platform: Platform.META })) };
@@ -86,6 +89,8 @@ export async function integrationRoutes(app: FastifyInstance) {
   app.get('/integrations/meta/callback', async (request, reply) => {
     const query = z.object({ code: z.string(), state: z.string() }).parse(request.query);
     const state = verifyState(query.state);
+    if (!(await isFeatureEnabled(state.tenantId, 'integrations'))) return reply.code(403).send({ message: 'Integracoes desativadas para esta empresa.' });
+    await assertClient(state.tenantId, state.clientId);
     const token = await exchangeMetaCode(query.code);
     const integration = await prisma.integration.create({
       data: {
@@ -102,7 +107,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     return reply.type('text/html').send('<html><body><h1>Meta Ads conectada</h1><p>Voce pode fechar esta janela.</p></body></html>');
   });
 
-  app.get('/integrations/meta/accounts', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.get('/integrations/meta/accounts', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request, reply) => {
     const query = z.object({ integrationId: z.string() }).parse(request.query);
     const integration = await prisma.integration.findFirst({ where: { id: query.integrationId, tenantId: request.user!.tenantId, platform: Platform.META } });
     if (!integration) return reply.code(404).send({ message: 'Integracao Meta nao encontrada.' });
@@ -111,7 +116,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     return { accounts: await listMetaAdAccounts(token) };
   });
 
-  app.post('/integrations/meta/connect-account', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.post('/integrations/meta/connect-account', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request) => {
     const body = z.object({
       clientId: z.string(),
       externalAccountId: z.string(),
@@ -128,7 +133,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     return { account };
   });
 
-  app.post('/integrations/meta/disconnect', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.post('/integrations/meta/disconnect', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request, reply) => {
     const body = z.object({ integrationId: z.string() }).parse(request.body);
     const integration = await prisma.integration.findFirst({ where: { id: body.integrationId, tenantId: request.user!.tenantId, platform: Platform.META } });
     if (!integration) return reply.code(404).send({ message: 'Integracao nao encontrada.' });
@@ -136,16 +141,17 @@ export async function integrationRoutes(app: FastifyInstance) {
     return { integration: publicIntegration(updated) };
   });
 
-  app.post('/integrations/meta/sync/:clientId', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.post('/integrations/meta/sync/:clientId', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request) => {
     const params = z.object({ clientId: z.string() }).parse(request.params);
     const body = z.object({ from: z.string().optional(), to: z.string().optional() }).parse(request.body ?? {});
+    await assertClient(request.user!.tenantId, params.clientId);
     const to = body.to || new Date().toISOString().slice(0, 10);
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - 7);
     return syncClientMetrics({ tenantId: request.user!.tenantId, clientId: params.clientId, platform: Platform.META, from: body.from || fromDate.toISOString().slice(0, 10), to, requestedBy: request.user!.sub });
   });
 
-  app.get('/integrations/google/auth-url', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.get('/integrations/google/auth-url', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request) => {
     const query = z.object({ clientId: z.string() }).parse(request.query);
     await assertClient(request.user!.tenantId, query.clientId);
     return { url: googleAuthUrl(signState({ tenantId: request.user!.tenantId, clientId: query.clientId, userId: request.user!.sub, platform: Platform.GOOGLE })) };
@@ -154,6 +160,8 @@ export async function integrationRoutes(app: FastifyInstance) {
   app.get('/integrations/google/callback', async (request, reply) => {
     const query = z.object({ code: z.string(), state: z.string() }).parse(request.query);
     const state = verifyState(query.state);
+    if (!(await isFeatureEnabled(state.tenantId, 'integrations'))) return reply.code(403).send({ message: 'Integracoes desativadas para esta empresa.' });
+    await assertClient(state.tenantId, state.clientId);
     const token = await exchangeGoogleCode(query.code);
     const integration = await prisma.integration.create({
       data: {
@@ -171,7 +179,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     return reply.type('text/html').send('<html><body><h1>Google Ads conectado</h1><p>Voce pode fechar esta janela.</p></body></html>');
   });
 
-  app.get('/integrations/google/accounts', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.get('/integrations/google/accounts', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request, reply) => {
     const query = z.object({ integrationId: z.string() }).parse(request.query);
     const integration = await prisma.integration.findFirst({ where: { id: query.integrationId, tenantId: request.user!.tenantId, platform: Platform.GOOGLE } });
     if (!integration) return reply.code(404).send({ message: 'Integracao Google nao encontrada.' });
@@ -180,7 +188,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     return { accounts: await listGoogleAccessibleCustomers(refreshToken) };
   });
 
-  app.post('/integrations/google/connect-account', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.post('/integrations/google/connect-account', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request) => {
     const body = z.object({
       clientId: z.string(),
       externalAccountId: z.string(),
@@ -197,7 +205,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     return { account };
   });
 
-  app.post('/integrations/google/disconnect', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request, reply) => {
+  app.post('/integrations/google/disconnect', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request, reply) => {
     const body = z.object({ integrationId: z.string() }).parse(request.body);
     const integration = await prisma.integration.findFirst({ where: { id: body.integrationId, tenantId: request.user!.tenantId, platform: Platform.GOOGLE } });
     if (!integration) return reply.code(404).send({ message: 'Integracao nao encontrada.' });
@@ -205,9 +213,10 @@ export async function integrationRoutes(app: FastifyInstance) {
     return { integration: publicIntegration(updated) };
   });
 
-  app.post('/integrations/google/sync/:clientId', { preHandler: requireRoles([Role.ADMIN, Role.MANAGER]) }, async (request) => {
+  app.post('/integrations/google/sync/:clientId', { preHandler: [requireRoles(MANAGER_ROLES), requireFeature('integrations')] }, async (request) => {
     const params = z.object({ clientId: z.string() }).parse(request.params);
     const body = z.object({ from: z.string().optional(), to: z.string().optional() }).parse(request.body ?? {});
+    await assertClient(request.user!.tenantId, params.clientId);
     const to = body.to || new Date().toISOString().slice(0, 10);
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - 7);

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { Platform } from '@prisma/client';
 import { z } from 'zod';
 import { requireAuth, resolveClientScope } from '../middleware/auth.js';
+import { requireFeature } from '../services/features.js';
 import { getCampaigns, getDashboardSummary } from '../services/metrics.js';
 
 function parseQuery(query: unknown) {
@@ -28,7 +29,7 @@ function csvEscape(value: unknown) {
 }
 
 export async function reportRoutes(app: FastifyInstance) {
-  app.get('/reports/export.csv', { preHandler: requireAuth }, async (request, reply) => {
+  app.get('/reports/export.csv', { preHandler: [requireAuth, requireFeature('reports')] }, async (request, reply) => {
     const query = parseQuery(request.query);
     const clientId = await resolveClientScope(request, query.clientId);
     const result = await getCampaigns({ tenantId: request.user!.tenantId, clientId, from: query.from, to: query.to, platform: query.platform });
@@ -50,7 +51,7 @@ export async function reportRoutes(app: FastifyInstance) {
       .send([header.map(csvEscape).join(','), ...rows].join('\n'));
   });
 
-  app.get('/reports/export.pdf', { preHandler: requireAuth }, async (request, reply) => {
+  app.get('/reports/export.pdf', { preHandler: [requireAuth, requireFeature('reports')] }, async (request, reply) => {
     const query = parseQuery(request.query);
     const clientId = await resolveClientScope(request, query.clientId);
     const summary = await getDashboardSummary({ tenantId: request.user!.tenantId, clientId, from: query.from, to: query.to, platform: query.platform });

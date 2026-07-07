@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { Platform, Role } from '@prisma/client';
+import { Platform } from '@prisma/client';
 import { z } from 'zod';
 import { requireAuth, resolveClientScope } from '../middleware/auth.js';
+import { requireFeature } from '../services/features.js';
 import { getCampaigns, getDailyMetrics, getDashboardHealth, getDashboardSummary, getPlatformDistribution, getTopCampaigns } from '../services/metrics.js';
 import { syncClientMetrics } from '../services/sync.js';
 
@@ -65,7 +66,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
     return getDashboardHealth({ tenantId: request.user!.tenantId, clientId });
   });
 
-  app.post('/dashboard/sync', { preHandler: requireAuth }, async (request, reply) => {
+  app.post('/dashboard/sync', { preHandler: [requireAuth, requireFeature('sync')] }, async (request, reply) => {
     const body = z.object({
       clientId: z.string().optional(),
       platform: z.nativeEnum(Platform).optional(),
@@ -73,7 +74,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       to: z.string().optional()
     }).parse(request.body);
     const clientId = await resolveClientScope(request, body.clientId);
-    if (!clientId && request.user!.role !== Role.CLIENT) return reply.code(400).send({ message: 'Informe clientId para sincronizar.' });
+    if (!clientId) return reply.code(400).send({ message: 'Informe clientId para sincronizar.' });
     const period = defaultPeriod();
     return syncClientMetrics({
       tenantId: request.user!.tenantId,

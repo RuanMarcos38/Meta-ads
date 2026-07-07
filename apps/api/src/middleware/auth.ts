@@ -3,6 +3,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { Role, UserStatus } from '@prisma/client';
 import { env } from '../env.js';
 import { prisma } from '../db.js';
+import { isClientScopedRole } from '../services/accessControl.js';
+import { assertTenantClient } from '../services/tenantScope.js';
 
 export type AuthUser = {
   sub: string;
@@ -37,7 +39,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
       where: { id: payload.sub, tenantId: payload.tenantId, status: UserStatus.ACTIVE },
       select: { id: true, tenantId: true, clientId: true, role: true, email: true, name: true }
     });
-    if (!user) return reply.code(401).send({ message: 'Token inválido ou usuário inativo.' });
+    if (!user) return reply.code(401).send({ message: 'Token invalido ou usuario inativo.' });
     request.user = {
       sub: user.id,
       userId: user.id,
@@ -48,7 +50,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
       name: user.name
     };
   } catch {
-    return reply.code(401).send({ message: 'Token expirado ou inválido.' });
+    return reply.code(401).send({ message: 'Token expirado ou invalido.' });
   }
 }
 
@@ -64,20 +66,15 @@ export function requireRoles(roles: Role[]) {
 
 export async function resolveClientScope(request: FastifyRequest, requestedClientId?: string | null) {
   const user = request.user;
-  if (!user) throw new Error('Usuário não autenticado.');
+  if (!user) throw new Error('Usuario nao autenticado.');
 
-  if (user.role === Role.CLIENT) {
-    if (!user.clientId) throw Object.assign(new Error('Usuário cliente sem cliente vinculado.'), { statusCode: 403 });
+  if (isClientScopedRole(user.role)) {
+    if (!user.clientId) throw Object.assign(new Error('Usuario cliente sem cliente vinculado.'), { statusCode: 403 });
     return user.clientId;
   }
 
   if (!requestedClientId) return undefined;
-  const client = await prisma.client.findFirst({
-    where: { id: requestedClientId, tenantId: user.tenantId },
-    select: { id: true }
-  });
-  if (!client) throw Object.assign(new Error('Cliente não encontrado para este tenant.'), { statusCode: 404 });
-  return client.id;
+  return assertTenantClient(user.tenantId, requestedClientId);
 }
 
 export async function assertClientAccess(request: FastifyRequest, clientId: string) {

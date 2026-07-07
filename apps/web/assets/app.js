@@ -20,6 +20,7 @@
     summary: null,
     campaigns: [],
     health: null,
+    features: {},
     loading: false,
     error: '',
     filters: { from: daysAgo(7), to: daysAgo(0), platform: '' }
@@ -82,6 +83,25 @@
     return `${Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
   }
 
+  function hasFeature(featureName) {
+    return state.features[featureName] !== false;
+  }
+
+  function isInternalUser() {
+    return demoMode || ['SUPER_ADMIN', 'COMPANY_ADMIN', 'ADMIN', 'MANAGER'].includes(state.user?.role);
+  }
+
+  function isClientScopedUser() {
+    return ['USER', 'CLIENT'].includes(state.user?.role);
+  }
+
+  function canAccessPage(page) {
+    if (page === 'clients' || page === 'settings') return isInternalUser();
+    if (page === 'integrations') return isInternalUser() && hasFeature('integrations');
+    if (page === 'reports') return hasFeature('reports');
+    return true;
+  }
+
   function query(extra = {}) {
     const params = new URLSearchParams();
     const clientId = extra.clientId ?? state.clientId;
@@ -108,6 +128,12 @@
         api.setUser(state.user);
       } catch {
         state.user = state.user || api.getUser();
+      }
+      try {
+        const features = await api.request('/feature-flags');
+        state.features = Object.fromEntries((features.flags || []).map((flag) => [flag.featureName, flag.enabled]));
+      } catch {
+        state.features = {};
       }
       const clients = await api.request('/clients');
       state.clients = clients.clients || [];
@@ -279,6 +305,11 @@
   }
 
   async function refreshData() {
+    if (!hasFeature('sync')) {
+      state.error = 'Sincronizacao desativada para esta empresa.';
+      render();
+      return;
+    }
     if (demoMode) {
       const btn = document.querySelector('[data-refresh]');
       const original = btn?.innerHTML || '';
@@ -339,6 +370,7 @@
   }
 
   function setPage(page) {
+    if (!canAccessPage(page)) return;
     state.page = page;
     render();
   }
@@ -349,12 +381,13 @@
 
   function renderShell(content) {
     const client = currentClient();
-    const internal = demoMode || ['ADMIN', 'MANAGER'].includes(state.user?.role);
+    const internal = isInternalUser();
     const nav = [
       navButton('dashboard', 'Resumo', '::'),
       navButton('campaigns', 'Campanhas', '[]'),
-      ...(internal ? [navButton('clients', 'Clientes', 'OO'), navButton('integrations', 'Integracoes', '<>')] : []),
-      navButton('reports', 'Relatorios', '##'),
+      ...(internal ? [navButton('clients', 'Clientes', 'OO')] : []),
+      ...(internal && hasFeature('integrations') ? [navButton('integrations', 'Integracoes', '<>')] : []),
+      ...(hasFeature('reports') ? [navButton('reports', 'Relatorios', '##')] : []),
       ...(internal ? [navButton('settings', 'Configuracoes', '..')] : [])
     ].join('');
 
@@ -402,7 +435,7 @@
           <p class="subtitle">${escapeHtml(subtitle)}</p>
         </div>
         <div class="actions">
-          <select class="client-select" data-client-select ${state.user?.role === 'CLIENT' ? 'disabled' : ''}>
+          <select class="client-select" data-client-select ${isClientScopedUser() ? 'disabled' : ''}>
             ${options.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === client.id ? 'selected' : ''}>${escapeHtml(item.tradeName || item.name)}</option>`).join('')}
           </select>
           <input class="filter-input" type="date" value="${escapeHtml(state.filters.from)}" data-filter="from" />
@@ -412,7 +445,7 @@
             <option value="META" ${state.filters.platform === 'META' ? 'selected' : ''}>Meta</option>
             <option value="GOOGLE" ${state.filters.platform === 'GOOGLE' ? 'selected' : ''}>Google</option>
           </select>
-          <button class="btn" data-refresh ${state.loading ? 'disabled' : ''}>R Atualizar</button>
+          <button class="btn" data-refresh ${state.loading || !hasFeature('sync') ? 'disabled' : ''}>R Atualizar</button>
         </div>
       </header>
     `;
@@ -602,6 +635,7 @@
       renderLogin();
       return;
     }
+    if (!canAccessPage(state.page)) state.page = 'dashboard';
     if (state.page === 'dashboard') renderDashboard();
     else if (state.page === 'campaigns') renderCampaigns();
     else if (state.page === 'clients') renderClients();
