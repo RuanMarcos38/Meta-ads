@@ -86,6 +86,8 @@ Porta: 3333
 
 Configure as variaveis de ambiente com base em `.env.example`.
 
+Na inicializacao do container, o Dockerfile executa `npm run migrate` e depois `npm run start`, garantindo que as migrations Prisma sejam aplicadas antes da API escutar na porta 3333.
+
 ## Hostinger
 
 Publique o conteudo de `apps/web` diretamente em `public_html` do subdominio `gestao.r2rmarketingdigital.com.br`.

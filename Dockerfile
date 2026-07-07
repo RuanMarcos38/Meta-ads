@@ -37,4 +37,4 @@ COPY --from=build /app/apps/api/dist ./dist
 
 EXPOSE 3333
 
-CMD ["npm", "run", "start"]
+CMD ["sh", "-c", "npm run migrate && npm run start"]
