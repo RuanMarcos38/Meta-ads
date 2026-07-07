@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const SERVICE_NAME = 'gestao-ads-api';
 const WEB_ORIGIN = process.env.WEB_ORIGIN || '*';
 const primaryPort = Number(process.env.PORT || process.env.API_PORT || 3333);
-const ports = Array.from(new Set([primaryPort, 3333, 3000].filter(Boolean)));
+const ports = Array.from(new Set([primaryPort, 3333, 333, 3000].filter(Boolean)));
 
 const demoUser = {
   id: 'usr_admin_demo',
@@ -133,6 +133,7 @@ async function handler(req, res) {
       service: SERVICE_NAME,
       status: 'healthy',
       port: primaryPort,
+      listeningPorts: ports,
       time: new Date().toISOString()
     });
     return;
