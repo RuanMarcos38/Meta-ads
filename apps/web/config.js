@@ -3,6 +3,7 @@ window.APP_CONFIG = {
   COMPANY_NAME: 'R2R Marketing Digital',
   API_BASE_URL: 'https://api-gestao.r2rmarketingdigital.com.br',
   DEMO_MODE: false,
+  LIVE_REFRESH_MS: 15000,
   DEFAULT_LOGIN: {
     email: 'admin@r2rmarketingdigital.com.br'
   },
