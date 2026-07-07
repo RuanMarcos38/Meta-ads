@@ -17,6 +17,7 @@ RUN npm --workspace apps/api run prisma:generate
 
 COPY apps/api/tsconfig.json ./apps/api/tsconfig.json
 COPY apps/api/src ./apps/api/src
+COPY apps/api/scripts ./apps/api/scripts
 RUN npm --workspace apps/api run build
 
 RUN npm prune --omit=dev
@@ -33,6 +34,7 @@ COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/package.json /app/package.json
 COPY --from=build /app/apps/api/package.json ./package.json
 COPY --from=build /app/apps/api/prisma ./prisma
+COPY --from=build /app/apps/api/scripts ./scripts
 COPY --from=build /app/apps/api/dist ./dist
 
 EXPOSE 3333
