@@ -108,7 +108,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       clientId: clientId!,
       platform: body.platform,
       from: body.from || period.from.toISOString().slice(0, 10),
-      to: body.to || period.toISOString?.() || period.to.toISOString().slice(0, 10),
+      to: body.to || period.to.toISOString().slice(0, 10),
       requestedBy: request.user!.sub
     });
   });
