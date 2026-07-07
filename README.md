@@ -14,12 +14,25 @@ O frontend aprovado da Hostinger foi preservado em `apps/web`. O backend fica em
 - Feature flags por empresa para `integrations`, `reports` e `sync`.
 - Cadastro de clientes, usuarios e contas de anuncio.
 - Dashboard com resumo, diarios, campanhas, distribuicao por plataforma e saude.
+- Monitoramento ao vivo via API em `/dashboard/live`.
 - Exportacao CSV e PDF.
 - OAuth preparado para Meta Ads e Google Ads.
 - Sincronizacao manual e recorrente com logs e locks.
 - Tokens de integracao criptografados no banco.
 - Dockerfile raiz para EasyPanel usando build path `/`.
 - Prisma schema com fallback de primeiro deploy usando `prisma db push` quando ainda nao houver migrations.
+
+## Sobre banco de dados e GitHub
+
+GitHub nao deve ser usado como banco de dados para acompanhamento online ao vivo. Ele deve ficar somente como repositorio de codigo. Dados de clientes, metricas, contas de anuncio, sincronizacoes e logs devem ficar no PostgreSQL acessado pelo backend Prisma.
+
+O acompanhamento ao vivo funciona assim:
+
+```text
+Frontend Hostinger -> Backend Fastify -> PostgreSQL/Prisma -> Meta Ads/Google Ads
+```
+
+O frontend consulta `/dashboard/live` a cada 15 segundos para mostrar se o painel esta online, se o banco esta respondendo e se existem sincronizacoes em andamento.
 
 ## Rodar localmente
 
@@ -45,6 +58,7 @@ Tambem existem aliases para facilitar testes de hospedagem:
 /api/health
 /api/ready
 /api/config
+/dashboard/live
 ```
 
 Frontend estatico:
@@ -121,6 +135,12 @@ https://api-gestao.r2rmarketingdigital.com.br/ready
 https://api-gestao.r2rmarketingdigital.com.br/api/config
 ```
 
+Depois de logado, teste o status ao vivo:
+
+```text
+https://api-gestao.r2rmarketingdigital.com.br/dashboard/live
+```
+
 ## Hostinger
 
 Publique o conteudo de `apps/web` diretamente em `public_html` do subdominio `gestao.r2rmarketingdigital.com.br`.
@@ -130,7 +150,8 @@ Edite `apps/web/config.js`:
 ```js
 window.APP_CONFIG = {
   API_BASE_URL: 'https://api-gestao.r2rmarketingdigital.com.br',
-  DEMO_MODE: false
+  DEMO_MODE: false,
+  LIVE_REFRESH_MS: 15000
 };
 ```
 
