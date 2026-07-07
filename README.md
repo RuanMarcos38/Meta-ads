@@ -34,6 +34,16 @@ Frontend Hostinger -> Backend Fastify -> PostgreSQL/Prisma -> Meta Ads/Google Ad
 
 O frontend consulta `/dashboard/live` a cada 15 segundos para mostrar se o painel esta online, se o banco esta respondendo e se existem sincronizacoes em andamento.
 
+## Supabase sem conflito com CRM
+
+Se usar o mesmo Supabase do CRM R2R, nao grave o Gestao Ads no schema `public`, porque esse schema ja possui tabelas de CRM que podem conflitar com o Prisma. Use schema isolado:
+
+```text
+DATABASE_SCHEMA=gestao_ads
+```
+
+O backend normaliza automaticamente a `DATABASE_URL` para usar esse schema quando a URL nao tiver parametro `schema`. O schema `gestao_ads` tambem foi criado no projeto Supabase CRM R2 MARKETING DIGITAL para evitar conflito com tabelas existentes.
+
 ## Rodar localmente
 
 ```bash
@@ -119,6 +129,7 @@ APP_URL=https://gestao.r2rmarketingdigital.com.br
 WEB_ORIGIN=https://gestao.r2rmarketingdigital.com.br
 API_URL=https://api-gestao.r2rmarketingdigital.com.br
 DATABASE_URL=postgresql://...
+DATABASE_SCHEMA=gestao_ads
 JWT_SECRET=mais_de_32_caracteres
 ENCRYPTION_KEY=mais_de_32_caracteres
 CORS_ORIGINS=https://gestao.r2rmarketingdigital.com.br,https://api-gestao.r2rmarketingdigital.com.br

@@ -19,6 +19,18 @@ function resolveDatabaseUrl() {
   return null;
 }
 
+function normalizeDatabaseUrl(rawUrl, schemaName) {
+  const trimmed = rawUrl.trim();
+  if (!trimmed.startsWith('postgres')) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    if (!url.searchParams.get('schema')) url.searchParams.set('schema', schemaName);
+    return url.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
 function run(label, args) {
   console.log(`[startup] ${label}`);
   const result = spawnSync('npx', args, { stdio: 'inherit', env: process.env });
@@ -32,14 +44,16 @@ if (!database) {
   process.exit(1);
 }
 
-process.env.DATABASE_URL = database.value;
+const schemaName = process.env.DATABASE_SCHEMA || 'gestao_ads';
+process.env.DATABASE_URL = normalizeDatabaseUrl(database.value, schemaName);
 
-if (!/^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL)) {
+if (!process.env.DATABASE_URL.startsWith('postgres')) {
   console.error(`[startup] ${database.key} nao e uma URL PostgreSQL valida.`);
   process.exit(1);
 }
 
 console.log(`[startup] Banco detectado via ${database.key}.`);
+console.log(`[startup] Schema Prisma isolado: ${schemaName}.`);
 
 const validateStatus = run('Validando Prisma schema', ['prisma', 'validate']);
 if (validateStatus !== 0) process.exit(validateStatus);
