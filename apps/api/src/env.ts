@@ -11,6 +11,21 @@ for (const key of databaseAliases) {
   }
 }
 
+function normalizeDatabaseUrl(rawUrl: string, schemaName: string) {
+  const trimmed = rawUrl.trim();
+  if (!trimmed.startsWith('postgres')) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    if (!url.searchParams.get('schema')) url.searchParams.set('schema', schemaName);
+    return url.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
+const databaseSchemaName = process.env.DATABASE_SCHEMA || 'gestao_ads';
+if (process.env.DATABASE_URL) process.env.DATABASE_URL = normalizeDatabaseUrl(process.env.DATABASE_URL, databaseSchemaName);
+
 const boolFromEnv = z.preprocess((value) => {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') return ['true', '1', 'yes', 'sim'].includes(value.toLowerCase());
@@ -29,6 +44,7 @@ const schema = z.object({
   APP_URL: z.string().url().default('http://localhost:5173'),
   API_URL: z.string().url().default('http://localhost:3333'),
   DATABASE_URL: z.string().min(1),
+  DATABASE_SCHEMA: z.string().default(databaseSchemaName),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default('7d'),
   ENCRYPTION_KEY: z.string().min(32),
