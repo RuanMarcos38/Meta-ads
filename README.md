@@ -1,34 +1,105 @@
-# Gestão Ads API - EasyPanel V7
+# Gestao Ads - R2R Marketing Digital
 
-Versão de estabilidade para subir a API no EasyPanel antes de conectar banco, Meta Ads e Google Ads reais.
+SaaS multi-cliente para gestor de trafego entregar a cada cliente um painel privado com resultados de Meta Ads e Google Ads.
 
-## Configuração no EasyPanel
+O frontend aprovado da Hostinger foi preservado em `apps/web`. O backend fica em `apps/api` e roda em Node.js, Fastify, TypeScript, Prisma e PostgreSQL.
 
-- Fonte: Upload
-- Construção: Dockerfile
-- Caminho do Dockerfile: Dockerfile
-- Porta interna: 3333 ou 3000
-- Health check: /health
+## O que esta incluido
 
-## Variáveis mínimas
+- Autenticacao JWT com senha criptografada.
+- Perfis `ADMIN`, `MANAGER` e `CLIENT`.
+- Isolamento por `tenantId` e `clientId`.
+- Cadastro de clientes, usuarios e contas de anuncio.
+- Dashboard com resumo, diarios, campanhas, distribuicao por plataforma e saude.
+- Exportacao CSV e PDF.
+- OAuth preparado para Meta Ads e Google Ads.
+- Sincronizacao manual e recorrente com logs e locks.
+- Tokens de integracao criptografados no banco.
+- Dockerfile raiz para EasyPanel usando build path `/`.
+- Migration Prisma inicial organizada.
+- Backup logico dos pacotes originais criado em `backup-original` durante a preparacao local.
 
-NODE_ENV=production
-PORT=3333
-API_PORT=3333
-WEB_ORIGIN=https://gestao.r2rmarketingdigital.com.br
-DEMO_MODE=true
-META_GRAPH_VERSION=v20.0
-META_APP_ID=2311855156219805
-META_APP_SECRET=SUA_CHAVE_SECRETA_REAL_DA_META
-META_REDIRECT_URI=https://api-gestao.r2rmarketingdigital.com.br/integrations/meta/callback
+## Rodar localmente
 
-## Testes
+```bash
+cp .env.example .env
+npm install
+npm run prisma:generate
+npm run migrate
+npm run seed
+npm run dev
+```
 
-https://api-gestao.r2rmarketingdigital.com.br/
-https://api-gestao.r2rmarketingdigital.com.br/health
-https://api-gestao.r2rmarketingdigital.com.br/integrations/meta/callback
+API:
 
-## Login demo
+```text
+http://localhost:3333/health
+```
 
-E-mail: admin@r2rmarketingdigital.com.br
-Senha: 123456
+Frontend estatico:
+
+Abra `apps/web/index.html` ou publique os arquivos em uma hospedagem estatica. Para usar dados reais, edite `apps/web/config.js`.
+
+## Testes e build
+
+```bash
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+```
+
+## Primeiro admin
+
+Opcao 1, seed:
+
+```bash
+npm run seed
+```
+
+Padrao do `.env.example`:
+
+```text
+admin@r2rmarketingdigital.com.br / 123456
+```
+
+Opcao 2, bootstrap:
+
+```bash
+curl -X POST http://localhost:3333/auth/bootstrap \
+  -H "Content-Type: application/json" \
+  -d "{\"tenantName\":\"R2R Marketing Digital\",\"name\":\"Administrador\",\"email\":\"admin@r2rmarketingdigital.com.br\",\"password\":\"123456\"}"
+```
+
+Troque a senha imediatamente em producao.
+
+## EasyPanel
+
+Crie o app do backend com:
+
+```text
+Build Path: /
+Dockerfile: Dockerfile
+Porta: 3333
+```
+
+Configure as variaveis de ambiente com base em `.env.example`.
+
+## Hostinger
+
+Publique o conteudo de `apps/web` diretamente em `public_html` do subdominio `gestao.r2rmarketingdigital.com.br`.
+
+Edite `apps/web/config.js`:
+
+```js
+window.APP_CONFIG = {
+  API_BASE_URL: 'https://api-gestao.r2rmarketingdigital.com.br',
+  DEMO_MODE: false
+};
+```
+
+## Credenciais externas
+
+Meta Ads e Google Ads dependem de apps oficiais, tokens e aprovacao de API. Sem essas credenciais, os endpoints ficam preparados e o modo demo pode ser ligado apenas para validacao visual.
+
+Mais detalhes em `README-BACKEND.md` e `docs/DEPLOY-HOSTINGER.md`.

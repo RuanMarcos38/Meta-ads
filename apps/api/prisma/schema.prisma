@@ -1,0 +1,449 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  CLIENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum TenantStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum Platform {
+  META
+  GOOGLE
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  ERROR
+  EXPIRED
+  DISCONNECTED
+}
+
+enum SyncStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  ERROR
+}
+
+model Tenant {
+  id                  String               @id @default(cuid())
+  name                String
+  slug                String               @unique
+  status              TenantStatus         @default(ACTIVE)
+  users               User[]
+  clients             Client[]
+  integrations        Integration[]
+  adAccounts          AdAccount[]
+  campaigns           Campaign[]
+  metrics             CampaignDailyMetric[]
+  syncJobs            PlatformSyncJob[]
+  syncLogs            SyncLog[]
+  apiTokens           ApiToken[]
+  goals               DashboardGoal[]
+  reportExports       ReportExport[]
+  auditLogs           AuditLog[]
+  passwordResetTokens PasswordResetToken[]
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  @@map("tenants")
+}
+
+model User {
+  id                  String               @id @default(cuid())
+  tenantId            String               @map("tenant_id")
+  clientId            String?              @map("client_id")
+  name                String
+  email               String               @unique
+  passwordHash        String               @map("password_hash")
+  role                Role                 @default(CLIENT)
+  status              UserStatus           @default(ACTIVE)
+  lastLoginAt         DateTime?            @map("last_login_at")
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client              Client?              @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientLinks         ClientUser[]
+  auditLogs           AuditLog[]
+  passwordResetTokens PasswordResetToken[]
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("users")
+}
+
+model Client {
+  id             String                @id @default(cuid())
+  tenantId       String                @map("tenant_id")
+  name           String
+  tradeName      String?               @map("trade_name")
+  slug           String
+  document       String?
+  email          String?
+  phone          String?
+  status         ClientStatus          @default(ACTIVE)
+  tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users          User[]
+  clientUsers    ClientUser[]
+  adAccounts     AdAccount[]
+  integrations   Integration[]
+  campaigns      Campaign[]
+  adSets         AdSet[]
+  ads            Ad[]
+  metrics        CampaignDailyMetric[]
+  syncJobs       PlatformSyncJob[]
+  syncLogs       SyncLog[]
+  goals          DashboardGoal[]
+  reportExports  ReportExport[]
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@map("clients")
+}
+
+model ClientUser {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  clientId  String   @map("client_id")
+  userId    String   @map("user_id")
+  role      Role     @default(CLIENT)
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([clientId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("client_users")
+}
+
+model AdAccount {
+  id                String                @id @default(cuid())
+  tenantId          String                @map("tenant_id")
+  clientId          String                @map("client_id")
+  platform          Platform
+  externalAccountId String                @map("external_account_id")
+  accountName       String                @map("account_name")
+  currency          String?               @default("BRL")
+  timezone          String?
+  status            String                @default("active")
+  lastSyncAt        DateTime?             @map("last_sync_at")
+  tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client            Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  campaigns         Campaign[]
+  adSets            AdSet[]
+  ads               Ad[]
+  metrics           CampaignDailyMetric[]
+  syncJobs          PlatformSyncJob[]
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+
+  @@unique([platform, externalAccountId, clientId])
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([platform])
+  @@map("ad_accounts")
+}
+
+model Integration {
+  id                    String            @id @default(cuid())
+  tenantId              String            @map("tenant_id")
+  clientId              String            @map("client_id")
+  platform              Platform
+  providerAccountId     String?           @map("provider_account_id")
+  accessTokenEncrypted  String?           @map("access_token_encrypted")
+  refreshTokenEncrypted String?           @map("refresh_token_encrypted")
+  tokenExpiresAt        DateTime?         @map("token_expires_at")
+  scopes                String?
+  status                IntegrationStatus @default(DISCONNECTED)
+  lastError             String?           @map("last_error")
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client                Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([platform])
+  @@map("integrations")
+}
+
+model Campaign {
+  id                 String                @id @default(cuid())
+  tenantId           String                @map("tenant_id")
+  clientId           String                @map("client_id")
+  adAccountId        String                @map("ad_account_id")
+  platform           Platform
+  externalCampaignId String                @map("external_campaign_id")
+  name               String
+  objective          String?
+  status             String?
+  effectiveStatus    String?               @map("effective_status")
+  buyingType         String?               @map("buying_type")
+  budgetDaily        Decimal?              @map("budget_daily") @db.Decimal(14, 2)
+  budgetLifetime     Decimal?              @map("budget_lifetime") @db.Decimal(14, 2)
+  startDate          DateTime?             @map("start_date")
+  endDate            DateTime?             @map("end_date")
+  tenant             Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client             Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  adAccount          AdAccount             @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  adSets             AdSet[]
+  ads                Ad[]
+  metrics            CampaignDailyMetric[]
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+
+  @@unique([platform, externalCampaignId, adAccountId])
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([platform])
+  @@index([externalCampaignId])
+  @@map("campaigns")
+}
+
+model AdSet {
+  id              String    @id @default(cuid())
+  tenantId        String    @map("tenant_id")
+  clientId        String    @map("client_id")
+  adAccountId     String    @map("ad_account_id")
+  campaignId      String    @map("campaign_id")
+  platform        Platform
+  externalAdSetId String    @map("external_ad_set_id")
+  name            String
+  status          String?
+  rawPayload      Json?     @map("raw_payload")
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  adAccount       AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaign        Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ads             Ad[]
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([platform, externalAdSetId, adAccountId])
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("ad_sets")
+}
+
+model Ad {
+  id           String    @id @default(cuid())
+  tenantId     String    @map("tenant_id")
+  clientId     String    @map("client_id")
+  adAccountId  String    @map("ad_account_id")
+  campaignId   String    @map("campaign_id")
+  adSetId      String?   @map("ad_set_id")
+  platform     Platform
+  externalAdId String    @map("external_ad_id")
+  name         String
+  status       String?
+  rawPayload   Json?     @map("raw_payload")
+  client       Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  adAccount    AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaign     Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  adSet        AdSet?    @relation(fields: [adSetId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@unique([platform, externalAdId, adAccountId])
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("ads")
+}
+
+model CampaignDailyMetric {
+  id              String    @id @default(cuid())
+  tenantId        String    @map("tenant_id")
+  clientId        String    @map("client_id")
+  adAccountId     String    @map("ad_account_id")
+  campaignId      String    @map("campaign_id")
+  platform        Platform
+  date            DateTime  @db.Date
+  spend           Decimal   @default(0) @db.Decimal(14, 2)
+  impressions     Int       @default(0)
+  reach           Int?
+  frequency       Decimal?  @db.Decimal(12, 4)
+  clicks          Int       @default(0)
+  linkClicks      Int?      @map("link_clicks")
+  ctr             Decimal   @default(0) @db.Decimal(12, 4)
+  cpc             Decimal   @default(0) @db.Decimal(14, 4)
+  cpm             Decimal   @default(0) @db.Decimal(14, 4)
+  conversions     Decimal   @default(0) @db.Decimal(14, 4)
+  leads           Decimal?  @db.Decimal(14, 4)
+  messages        Decimal?  @db.Decimal(14, 4)
+  purchases       Decimal?  @db.Decimal(14, 4)
+  purchaseValue   Decimal?  @map("purchase_value") @db.Decimal(14, 2)
+  costPerResult   Decimal   @default(0) @map("cost_per_result") @db.Decimal(14, 4)
+  roas            Decimal?  @db.Decimal(14, 4)
+  rawPayload      Json?     @map("raw_payload")
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  adAccount       AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaign        Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([campaignId, date, platform])
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([platform])
+  @@index([date])
+  @@index([campaignId])
+  @@index([adAccountId])
+  @@map("campaign_daily_metrics")
+}
+
+model PlatformSyncJob {
+  id              String     @id @default(cuid())
+  tenantId        String     @map("tenant_id")
+  clientId        String     @map("client_id")
+  adAccountId     String?    @map("ad_account_id")
+  platform        Platform?
+  status          SyncStatus @default(QUEUED)
+  lockKey         String     @map("lock_key")
+  fromDate        DateTime?  @map("from_date") @db.Date
+  toDate          DateTime?  @map("to_date") @db.Date
+  campaignsSynced Int        @default(0) @map("campaigns_synced")
+  metricsSynced   Int        @default(0) @map("metrics_synced")
+  errorMessage    String?    @map("error_message")
+  startedAt       DateTime?  @map("started_at")
+  finishedAt      DateTime?  @map("finished_at")
+  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client          Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  adAccount       AdAccount? @relation(fields: [adAccountId], references: [id], onDelete: SetNull)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([platform])
+  @@index([status])
+  @@index([lockKey])
+  @@map("platform_sync_jobs")
+}
+
+model SyncLog {
+  id        String    @id @default(cuid())
+  tenantId  String    @map("tenant_id")
+  clientId  String?   @map("client_id")
+  platform  Platform?
+  level     String    @default("info")
+  message   String
+  metadata  Json?
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client    Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([platform])
+  @@index([createdAt])
+  @@map("sync_logs")
+}
+
+model ApiToken {
+  id        String    @id @default(cuid())
+  tenantId  String    @map("tenant_id")
+  name      String
+  tokenHash String    @map("token_hash")
+  scopes    String?
+  expiresAt DateTime? @map("expires_at")
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("api_tokens")
+}
+
+model DashboardGoal {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  clientId    String   @map("client_id")
+  metric      String
+  targetValue Decimal  @map("target_value") @db.Decimal(14, 2)
+  period      String   @default("monthly")
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("dashboard_goals")
+}
+
+model ReportExport {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  clientId  String   @map("client_id")
+  format    String
+  fromDate  DateTime @map("from_date") @db.Date
+  toDate    DateTime @map("to_date") @db.Date
+  status    String   @default("generated")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("report_exports")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  userId    String?  @map("user_id")
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  metadata  Json?
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tenantId  String    @map("tenant_id")
+  userId    String    @map("user_id")
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("password_reset_tokens")
+}
