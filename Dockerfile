@@ -33,6 +33,7 @@ COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/package.json /app/package.json
 COPY --from=build /app/apps/api/package.json ./package.json
 COPY --from=build /app/apps/api/prisma ./prisma
+COPY --from=build /app/apps/api/scripts ./scripts
 COPY --from=build /app/apps/api/dist ./dist
 
 EXPOSE 3333
