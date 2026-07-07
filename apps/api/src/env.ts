@@ -1,6 +1,16 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+const databaseAliases = ['DATABASE_URL', 'POSTGRES_URL', 'POSTGRESQL_URL', 'POSTGRES_CONNECTION_STRING', 'DATABASE_PRIVATE_URL', 'DATABASE_PUBLIC_URL', 'POSTGRES_PRISMA_URL', 'PG_DATABASE_URL'];
+
+for (const key of databaseAliases) {
+  const value = process.env[key];
+  if (!process.env.DATABASE_URL && value && value.trim()) {
+    process.env.DATABASE_URL = value.trim();
+    break;
+  }
+}
+
 const boolFromEnv = z.preprocess((value) => {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') return ['true', '1', 'yes', 'sim'].includes(value.toLowerCase());
