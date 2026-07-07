@@ -23,11 +23,20 @@ const app = Fastify({
   }
 });
 
+const allowedOrigins = new Set([
+  ...env.CORS_ORIGINS,
+  env.APP_URL,
+  env.WEB_ORIGIN,
+  env.API_URL,
+  'http://localhost:3333',
+  'http://127.0.0.1:3333'
+].filter(Boolean));
+
 await app.register(cors, {
   credentials: true,
   origin(origin, callback) {
-    if (!origin || env.CORS_ORIGINS.includes(origin)) return callback(null, true);
-    callback(new Error('Origem não permitida pelo CORS.'), false);
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    callback(new Error(`Origem nao permitida pelo CORS: ${origin}`), false);
   }
 });
 
@@ -36,21 +45,41 @@ await app.register(rateLimit, {
   timeWindow: '1 minute'
 });
 
-app.get('/health', async () => ({
-  ok: true,
-  service: 'gestao-ads-api',
-  time: new Date().toISOString()
-}));
+function healthPayload() {
+  return {
+    ok: true,
+    service: 'gestao-ads-api',
+    version: '2026.07.07-production-fix',
+    environment: env.NODE_ENV,
+    port: env.API_PORT,
+    appUrl: env.APP_URL,
+    apiUrl: env.API_URL,
+    time: new Date().toISOString()
+  };
+}
 
-app.get('/ready', async (request, reply) => {
+async function readyHandler(request: any, reply: any) {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    return { ok: true, database: 'ready' };
+    return { ...healthPayload(), database: 'ready' };
   } catch (error) {
     request.log.error(error);
-    return reply.code(503).send({ ok: false, database: 'unavailable' });
+    return reply.code(503).send({ ...healthPayload(), ok: false, database: 'unavailable' });
   }
-});
+}
+
+app.get('/health', async () => healthPayload());
+app.get('/api/health', async () => healthPayload());
+app.get('/ready', readyHandler);
+app.get('/api/ready', readyHandler);
+app.get('/api/config', async () => ({
+  ok: true,
+  appName: 'Gestao Ads',
+  appUrl: env.APP_URL,
+  apiUrl: env.API_URL,
+  demoMode: env.DEMO_MODE,
+  features: ['integrations', 'reports', 'sync']
+}));
 
 await app.register(authRoutes);
 await app.register(clientRoutes);
@@ -65,7 +94,7 @@ await app.register(syncRoutes);
 app.setErrorHandler((error, request, reply) => {
   request.log.error(error);
   if (error instanceof ZodError) {
-    return reply.code(400).send({ message: 'Dados inválidos.', details: error.flatten() });
+    return reply.code(400).send({ message: 'Dados invalidos.', details: error.flatten() });
   }
   const typedError = error as Error & { statusCode?: number };
   const statusCode = Number(typedError.statusCode || 500);

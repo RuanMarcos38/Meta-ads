@@ -37,4 +37,6 @@ COPY --from=build /app/apps/api/dist ./dist
 
 EXPOSE 3333
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node -e "fetch('http://127.0.0.1:'+(process.env.API_PORT||process.env.PORT||3333)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 CMD ["sh", "-c", "npm run migrate && npm run start"]

@@ -4,8 +4,7 @@ window.APP_CONFIG = {
   API_BASE_URL: 'https://api-gestao.r2rmarketingdigital.com.br',
   DEMO_MODE: false,
   DEFAULT_LOGIN: {
-    email: 'admin@r2rmarketingdigital.com.br',
-    password: '123456'
+    email: 'admin@r2rmarketingdigital.com.br'
   },
   WHATSAPP_SUPPORT: '5547996753735'
 };

@@ -19,8 +19,7 @@ O frontend aprovado da Hostinger foi preservado em `apps/web`. O backend fica em
 - Sincronizacao manual e recorrente com logs e locks.
 - Tokens de integracao criptografados no banco.
 - Dockerfile raiz para EasyPanel usando build path `/`.
-- Migration Prisma inicial organizada.
-- Backup logico dos pacotes originais criado em `backup-original` durante a preparacao local.
+- Prisma schema com fallback de primeiro deploy usando `prisma db push` quando ainda nao houver migrations.
 
 ## Rodar localmente
 
@@ -37,6 +36,15 @@ API:
 
 ```text
 http://localhost:3333/health
+http://localhost:3333/ready
+```
+
+Tambem existem aliases para facilitar testes de hospedagem:
+
+```text
+/api/health
+/api/ready
+/api/config
 ```
 
 Frontend estatico:
@@ -60,18 +68,14 @@ Opcao 1, seed:
 npm run seed
 ```
 
-Padrao do `.env.example`:
-
-```text
-admin@r2rmarketingdigital.com.br / 123456
-```
+No EasyPanel, rode o seed somente depois do banco estar criado e troque `SEED_ADMIN_PASSWORD` antes de executar.
 
 Opcao 2, bootstrap:
 
 ```bash
-curl -X POST http://localhost:3333/auth/bootstrap \
+curl -X POST https://api-gestao.r2rmarketingdigital.com.br/auth/bootstrap \
   -H "Content-Type: application/json" \
-  -d "{\"tenantName\":\"R2R Marketing Digital\",\"name\":\"Administrador\",\"email\":\"admin@r2rmarketingdigital.com.br\",\"password\":\"123456\"}"
+  -d "{\"tenantName\":\"R2R Marketing Digital\",\"name\":\"Administrador\",\"email\":\"admin@r2rmarketingdigital.com.br\",\"password\":\"TROQUE_POR_SENHA_FORTE\"}"
 ```
 
 Troque a senha imediatamente em producao.
@@ -81,14 +85,41 @@ Troque a senha imediatamente em producao.
 Crie o app do backend com:
 
 ```text
+Repositorio: RuanMarcos38/Meta-ads
+Branch: main
 Build Path: /
 Dockerfile: Dockerfile
-Porta: 3333
+Porta interna: 3333
+Health check: /health
 ```
 
 Configure as variaveis de ambiente com base em `.env.example`.
 
-Na inicializacao do container, o Dockerfile executa `npm run migrate` e depois `npm run start`, garantindo que as migrations Prisma sejam aplicadas antes da API escutar na porta 3333.
+Obrigatorias:
+
+```text
+NODE_ENV=production
+PORT=3333
+API_PORT=3333
+APP_URL=https://gestao.r2rmarketingdigital.com.br
+WEB_ORIGIN=https://gestao.r2rmarketingdigital.com.br
+API_URL=https://api-gestao.r2rmarketingdigital.com.br
+DATABASE_URL=postgresql://...
+JWT_SECRET=mais_de_32_caracteres
+ENCRYPTION_KEY=mais_de_32_caracteres
+CORS_ORIGINS=https://gestao.r2rmarketingdigital.com.br,https://api-gestao.r2rmarketingdigital.com.br
+DEMO_MODE=false
+```
+
+Na inicializacao do container, o Dockerfile executa `npm run migrate` e depois `npm run start`. O script de migration tenta `prisma migrate deploy` e, se ainda nao houver migrations, usa `prisma db push` para criar o schema do primeiro deploy.
+
+Teste depois do deploy:
+
+```text
+https://api-gestao.r2rmarketingdigital.com.br/health
+https://api-gestao.r2rmarketingdigital.com.br/ready
+https://api-gestao.r2rmarketingdigital.com.br/api/config
+```
 
 ## Hostinger
 
