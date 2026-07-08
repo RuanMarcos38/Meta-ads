@@ -1,8 +1,5 @@
 node_modules
-.env
-.env.local
 dist
-coverage
-.DS_Store
+.env
 *.log
-apps/api/prisma/dev.db
+.DS_Store
