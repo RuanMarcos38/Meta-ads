@@ -7,14 +7,14 @@
   ],
   "scripts": {
     "dev": "npm --workspace apps/api run dev",
-    "build": "npm --workspace apps/api run build && npm --workspace apps/web run validate",
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:web": "npm --workspace apps/web run dev",
+    "build": "npm --workspace apps/api run build && npm --workspace apps/web run build",
     "start": "npm --workspace apps/api run start",
-    "lint": "npm --workspace apps/api run lint",
-    "typecheck": "npm --workspace apps/api run typecheck",
+    "typecheck": "npm --workspace apps/api run typecheck && npm --workspace apps/web run typecheck",
     "test": "npm --workspace apps/api run test",
+    "seed": "npm --workspace apps/api run seed",
     "prisma:generate": "npm --workspace apps/api run prisma:generate",
-    "migrate": "npm --workspace apps/api run migrate",
-    "prisma:push": "npm --workspace apps/api run prisma:push",
-    "seed": "npm --workspace apps/api run seed"
+    "prisma:migrate": "npm --workspace apps/api run prisma:migrate"
   }
 }

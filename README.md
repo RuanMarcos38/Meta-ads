@@ -1,173 +1,68 @@
-# Gestao Ads - R2R Marketing Digital
+# Gestão Ads — R2R Marketing Digital
 
-SaaS multi-cliente para gestor de trafego entregar a cada cliente um painel privado com resultados de Meta Ads e Google Ads.
+Solução SaaS para clientes acompanharem campanhas de tráfego pago, com foco em Meta Ads.
 
-Status: backend em revisao de producao com isolamento por empresa.
+## Stack
 
-O frontend aprovado da Hostinger foi preservado em `apps/web`. O backend fica em `apps/api` e roda em Node.js, Fastify, TypeScript, Prisma e PostgreSQL.
-
-## O que esta incluido
-
-- Autenticacao JWT com senha criptografada.
-- Perfis `SUPER_ADMIN`, `COMPANY_ADMIN`, `MANAGER` e `USER`, com compatibilidade para `ADMIN` e `CLIENT`.
-- Isolamento por `tenantId` e `clientId`.
-- Feature flags por empresa para `integrations`, `reports` e `sync`.
-- Cadastro de clientes, usuarios e contas de anuncio.
-- Dashboard com resumo, diarios, campanhas, distribuicao por plataforma e saude.
-- Monitoramento ao vivo via API em `/dashboard/live`.
-- Exportacao CSV e PDF.
-- OAuth preparado para Meta Ads e Google Ads.
-- Sincronizacao manual e recorrente com logs e locks.
-- Tokens de integracao criptografados no banco.
-- Dockerfile raiz para EasyPanel usando build path `/`.
-- Prisma schema com fallback de primeiro deploy usando `prisma db push` quando ainda nao houver migrations.
-
-## Sobre banco de dados e GitHub
-
-GitHub nao deve ser usado como banco de dados para acompanhamento online ao vivo. Ele deve ficar somente como repositorio de codigo. Dados de clientes, metricas, contas de anuncio, sincronizacoes e logs devem ficar no PostgreSQL acessado pelo backend Prisma.
-
-O acompanhamento ao vivo funciona assim:
-
-```text
-Frontend Hostinger -> Backend Fastify -> PostgreSQL/Prisma -> Meta Ads/Google Ads
-```
-
-O frontend consulta `/dashboard/live` a cada 15 segundos para mostrar se o painel esta online, se o banco esta respondendo e se existem sincronizacoes em andamento.
-
-## Supabase sem conflito com CRM
-
-Se usar o mesmo Supabase do CRM R2R, nao grave o Gestao Ads no schema `public`, porque esse schema ja possui tabelas de CRM que podem conflitar com o Prisma. Use schema isolado:
-
-```text
-DATABASE_SCHEMA=gestao_ads
-```
-
-O backend normaliza automaticamente a `DATABASE_URL` para usar esse schema quando a URL nao tiver parametro `schema`. O schema `gestao_ads` tambem foi criado no projeto Supabase CRM R2 MARKETING DIGITAL para evitar conflito com tabelas existentes.
+- Backend: Node 20, TypeScript, Fastify, Prisma, PostgreSQL, JWT, Argon2
+- Frontend: React 18, Vite, TypeScript, Tailwind, Recharts, Axios, Zustand
+- Infra: Docker, Docker Compose, GitHub Actions
+- Meta Ads: integração preparada com Marketing/Graph API oficial
 
 ## Rodar localmente
 
 ```bash
-cp .env.example .env
 npm install
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env
 npm run prisma:generate
-npm run migrate
+npm --workspace apps/api run prisma:migrate
 npm run seed
-npm run dev
+npm run dev:api
 ```
 
-API:
-
-```text
-http://localhost:3333/health
-http://localhost:3333/ready
-```
-
-Tambem existem aliases para facilitar testes de hospedagem:
-
-```text
-/api/health
-/api/ready
-/api/config
-/dashboard/live
-```
-
-Frontend estatico:
-
-Abra `apps/web/index.html` ou publique os arquivos em uma hospedagem estatica. Para usar dados reais, edite `apps/web/config.js`.
-
-## Testes e build
+Em outro terminal:
 
 ```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run build
+npm run dev:web
 ```
 
-## Primeiro admin
+Login demo:
 
-Opcao 1, seed:
-
-```bash
-npm run seed
+```txt
+admin@r2rmarketingdigital.com.br
+123456
 ```
 
-No EasyPanel, rode o seed somente depois do banco estar criado e troque `SEED_ADMIN_PASSWORD` antes de executar.
+## Produção
 
-Opcao 2, bootstrap:
+Backend EasyPanel:
 
-```bash
-curl -X POST https://api-gestao.r2rmarketingdigital.com.br/auth/bootstrap \
-  -H "Content-Type: application/json" \
-  -d "{\"tenantName\":\"R2R Marketing Digital\",\"name\":\"Administrador\",\"email\":\"admin@r2rmarketingdigital.com.br\",\"password\":\"TROQUE_POR_SENHA_FORTE\"}"
-```
-
-Troque a senha imediatamente em producao.
-
-## EasyPanel
-
-Crie o app do backend com:
-
-```text
-Repositorio: RuanMarcos38/Meta-ads
-Branch: main
+```txt
 Build Path: /
 Dockerfile: Dockerfile
 Porta interna: 3333
-Health check: /health
+Healthcheck: /health
 ```
 
-Configure as variaveis de ambiente com base em `.env.example`.
+Frontend Hostinger:
 
-Obrigatorias:
-
-```text
-NODE_ENV=production
-PORT=3333
-API_PORT=3333
-APP_URL=https://gestao.r2rmarketingdigital.com.br
-WEB_ORIGIN=https://gestao.r2rmarketingdigital.com.br
-API_URL=https://api-gestao.r2rmarketingdigital.com.br
-DATABASE_URL=postgresql://...
-DATABASE_SCHEMA=gestao_ads
-JWT_SECRET=mais_de_32_caracteres
-ENCRYPTION_KEY=mais_de_32_caracteres
-CORS_ORIGINS=https://gestao.r2rmarketingdigital.com.br,https://api-gestao.r2rmarketingdigital.com.br
-DEMO_MODE=false
+```bash
+cd apps/web
+npm install
+npm run build
 ```
 
-Na inicializacao do container, o Dockerfile executa `npm run migrate` e depois `npm run start`. O script de migration tenta `prisma migrate deploy` e, se ainda nao houver migrations, usa `prisma db push` para criar o schema do primeiro deploy.
+Suba o conteúdo de `apps/web/dist` para o `public_html` do subdomínio.
 
-Teste depois do deploy:
+## URLs esperadas
 
-```text
-https://api-gestao.r2rmarketingdigital.com.br/health
-https://api-gestao.r2rmarketingdigital.com.br/ready
-https://api-gestao.r2rmarketingdigital.com.br/api/config
+```txt
+Frontend: https://gestao.r2rmarketingdigital.com.br
+API: https://api-gestao.r2rmarketingdigital.com.br
+Health: https://api-gestao.r2rmarketingdigital.com.br/health
 ```
 
-Depois de logado, teste o status ao vivo:
+## Observação
 
-```text
-https://api-gestao.r2rmarketingdigital.com.br/dashboard/live
-```
-
-## Hostinger
-
-Publique o conteudo de `apps/web` diretamente em `public_html` do subdominio `gestao.r2rmarketingdigital.com.br`.
-
-Edite `apps/web/config.js`:
-
-```js
-window.APP_CONFIG = {
-  API_BASE_URL: 'https://api-gestao.r2rmarketingdigital.com.br',
-  DEMO_MODE: false,
-  LIVE_REFRESH_MS: 15000
-};
-```
-
-## Credenciais externas
-
-Meta Ads e Google Ads dependem de apps oficiais, tokens e aprovacao de API. Sem essas credenciais, os endpoints ficam preparados e o modo demo pode ser ligado apenas para validacao visual.
-
-Mais detalhes em `README-BACKEND.md`, `docs/DEPLOY-HOSTINGER.md` e `docs/SECURITY-AUDIT.md`.
+Com `DEMO_MODE=true`, o dashboard funciona com dados simulados. Para produção real, defina `DEMO_MODE=false` e configure `META_APP_ID`, `META_APP_SECRET`, `META_REDIRECT_URI`, `DATABASE_URL`, `JWT_SECRET` e `ENCRYPTION_KEY`.
