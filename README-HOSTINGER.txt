@@ -1,42 +1,64 @@
-GESTÃO ADS — PUBLICAÇÃO NA HOSTINGER
+FRONTEND FINAL - GESTAO ADS R2R
 
-FRONTEND:
-1. Entre na pasta apps/web.
-2. Configure .env:
-   VITE_API_BASE_URL=https://api-gestao.r2rmarketingdigital.com.br
-3. Execute:
-   npm install
-   npm run build
-4. Suba TODO o conteúdo da pasta apps/web/dist para o public_html do subdomínio:
-   gestao.r2rmarketingdigital.com.br
-
-ARQUIVOS ESPERADOS NO PUBLIC_HTML:
+ARQUIVOS DO PACOTE:
 - index.html
-- assets/
+- config.js
 - .htaccess
+- assets/styles.css
+- assets/app.js
 
-BACKEND:
-O backend deve rodar separado em VPS/EasyPanel, pois Hostinger comum não roda Node API em produção estável.
+COMO INSTALAR NA HOSTINGER:
+1. Acesse Hostinger > Gerenciador de Arquivos.
+2. Abra a pasta public_html do subdominio gestao.r2rmarketingdigital.com.br.
+3. Apague os arquivos antigos do painel ou renomeie a pasta antiga como backup.
+4. Envie os arquivos deste pacote ou sincronize pelo GitHub.
+5. Confirme que os arquivos ficaram diretamente dentro de public_html:
+   public_html/index.html
+   public_html/config.js
+   public_html/.htaccess
+   public_html/assets/styles.css
+   public_html/assets/app.js
+6. Abra o site e use CTRL + F5 para limpar cache.
 
-Configuração EasyPanel:
+LOGIN DEMO:
+E-mail: admin@r2rmarketingdigital.com.br
+Senha: 123456
+
+BACKEND/API:
+O config.js ja esta apontando para:
+API_BASE_URL: 'https://api-gestao.r2rmarketingdigital.com.br'
+DEMO_MODE: false
+
+Se a API ainda nao estiver publicada, altere temporariamente:
+API_BASE_URL: ''
+DEMO_MODE: true
+
+Com DEMO_MODE=false, o painel autentica na API, carrega dados do dashboard e usa o botao Atualizar para chamar /dashboard/sync.
+
+OBSERVACAO IMPORTANTE:
+O index.html anexado originalmente apontava para assets gerados pelo Vite:
+- /assets/index-BS6TQsKj.js
+- /assets/index-pr3CyKpo.css
+
+Como esses arquivos nao foram enviados, este pacote foi ajustado para usar:
+- /assets/app.js
+- /assets/styles.css
+
+Assim o frontend fica funcional para publicacao direta na Hostinger.
+
+REVISAO VISUAL APLICADA:
+- Cards reduzidos e padronizados.
+- Fontes menores e mais legiveis.
+- Layout mais limpo para cliente final.
+- Resumo executivo no topo.
+- Tabela focada apenas nas principais informacoes.
+- Melhor responsividade para desktop, notebook e celular.
+
+BACKEND EASYPANEL:
 - Repository: RuanMarcos38/Meta-ads
-- Branch: main ou feat/gestao-ads-saas-completo
+- Branch: main
 - Build Path: /
 - Dockerfile: Dockerfile
 - Porta interna: 3333
 - Healthcheck: /health
-- Domínio: api-gestao.r2rmarketingdigital.com.br
-
-VARIÁVEIS PRINCIPAIS:
-NODE_ENV=production
-PORT=3333
-DATABASE_URL=postgresql://...
-DIRECT_URL=postgresql://...
-JWT_SECRET=gere_uma_chave_forte
-JWT_REFRESH_SECRET=gere_uma_chave_forte
-ENCRYPTION_KEY=gere_64_caracteres_hex
-CORS_ORIGINS=https://gestao.r2rmarketingdigital.com.br
-DEMO_MODE=false
-META_APP_ID=
-META_APP_SECRET=
-META_REDIRECT_URI=https://api-gestao.r2rmarketingdigital.com.br/meta/oauth/callback
+- Dominio API: https://api-gestao.r2rmarketingdigital.com.br
