@@ -4,7 +4,7 @@ import { MetaAdsService } from './MetaAdsService.js';
 import { mapMetaActions } from './metaActions.js';
 import dayjs from 'dayjs';
 
-// Dispara sincronização real das contas Meta de um cliente
+// Dispara sincronização real das contas Meta de um cliente.
 export async function runSync(organizationId: string, clientId: string | undefined, userId?: string) {
   const job = await prisma.syncJob.create({
     data: { organizationId, clientId, type: 'manual', status: 'running', createdBy: userId },
@@ -21,55 +21,114 @@ export async function runSync(organizationId: string, clientId: string | undefin
     const until = dayjs().format('YYYY-MM-DD');
 
     for (const acc of accounts) {
+      if (acc.connection.organizationId !== organizationId) {
+        throw new Error('Conexão Meta não pertence à organização autenticada.');
+      }
+      if (clientId && acc.clientId !== clientId) {
+        throw new Error('Conta de anúncio não pertence ao cliente autenticado.');
+      }
+
       const token = decrypt(acc.connection.accessTokenEncrypted);
       const meta = new MetaAdsService(token);
-
       const metaAccountId = acc.accountId.startsWith('act_') ? acc.accountId : `act_${acc.accountId}`;
+
       const campaigns = await meta.campaigns(metaAccountId);
-      for (const c of campaigns) {
+      for (const campaign of campaigns) {
         await prisma.campaign.upsert({
-          where: { adAccountId_metaCampaignId: { adAccountId: acc.id, metaCampaignId: c.id } },
-          update: { name: c.name, objective: c.objective, status: c.status, effectiveStatus: c.effective_status,
-            dailyBudget: c.daily_budget ? Number(c.daily_budget) / 100 : null,
-            lifetimeBudget: c.lifetime_budget ? Number(c.lifetime_budget) / 100 : null },
-          create: { organizationId, clientId: acc.clientId, adAccountId: acc.id, metaCampaignId: c.id,
-            name: c.name, objective: c.objective, status: c.status, effectiveStatus: c.effective_status },
+          where: {
+            adAccountId_metaCampaignId: {
+              adAccountId: acc.id,
+              metaCampaignId: campaign.id,
+            },
+          },
+          update: {
+            name: campaign.name,
+            objective: campaign.objective,
+            status: campaign.status,
+            effectiveStatus: campaign.effective_status,
+            dailyBudget: campaign.daily_budget ? Number(campaign.daily_budget) / 100 : null,
+            lifetimeBudget: campaign.lifetime_budget ? Number(campaign.lifetime_budget) / 100 : null,
+          },
+          create: {
+            organizationId,
+            clientId: acc.clientId,
+            adAccountId: acc.id,
+            metaCampaignId: campaign.id,
+            name: campaign.name,
+            objective: campaign.objective,
+            status: campaign.status,
+            effectiveStatus: campaign.effective_status,
+            dailyBudget: campaign.daily_budget ? Number(campaign.daily_budget) / 100 : null,
+            lifetimeBudget: campaign.lifetime_budget ? Number(campaign.lifetime_budget) / 100 : null,
+          },
         });
       }
 
       const insights = await meta.insights(metaAccountId, since, until, 'campaign');
-      for (const ins of insights) {
-        const m = mapMetaActions(ins.actions);
-        const spend = Number(ins.spend || 0);
+      for (const insight of insights) {
+        const mapped = mapMetaActions(insight.actions);
+        const spend = Number(insight.spend || 0);
+        const metrics = {
+          spend,
+          impressions: Number(insight.impressions || 0),
+          reach: Number(insight.reach || 0),
+          frequency: Number(insight.frequency || 0),
+          clicks: Number(insight.clicks || 0),
+          inlineLinkClicks: Number(insight.inline_link_clicks || 0),
+          ctr: Number(insight.ctr || 0),
+          cpc: Number(insight.cpc || 0),
+          cpm: Number(insight.cpm || 0),
+          leads: mapped.leads,
+          conversations: mapped.conversations,
+          purchases: mapped.purchases,
+          costPerLead: mapped.leads ? spend / mapped.leads : 0,
+          costPerConversation: mapped.conversations ? spend / mapped.conversations : 0,
+          rawActionsJson: insight.actions ?? undefined,
+          rawCostPerActionJson: insight.cost_per_action_type ?? undefined,
+        };
+
         await prisma.insightDaily.upsert({
-          where: { level_date_adAccountId_campaignId_adSetId_adId: {
-            level: 'campaign', date: new Date(ins.date_start), adAccountId: acc.id,
-            campaignId: ins.campaign_id, adSetId: '', adId: '' } },
-          update: {}, // simplificado
-          create: {
-            organizationId, clientId: acc.clientId, adAccountId: acc.id, campaignId: ins.campaign_id,
-            adSetId: '', adId: '', level: 'campaign', date: new Date(ins.date_start),
-            spend, impressions: Number(ins.impressions || 0), reach: Number(ins.reach || 0),
-            frequency: Number(ins.frequency || 0), clicks: Number(ins.clicks || 0),
-            inlineLinkClicks: Number(ins.inline_link_clicks || 0), ctr: Number(ins.ctr || 0),
-            cpc: Number(ins.cpc || 0), cpm: Number(ins.cpm || 0),
-            leads: m.leads, conversations: m.conversations, purchases: m.purchases,
-            costPerLead: m.leads ? spend / m.leads : 0,
-            costPerConversation: m.conversations ? spend / m.conversations : 0,
-            rawActionsJson: ins.actions ?? undefined,
-            rawCostPerActionJson: ins.cost_per_action_type ?? undefined,
+          where: {
+            level_date_adAccountId_campaignId_adSetId_adId: {
+              level: 'campaign',
+              date: new Date(insight.date_start),
+              adAccountId: acc.id,
+              campaignId: insight.campaign_id,
+              adSetId: '',
+              adId: '',
+            },
           },
-        }).catch(() => {});
-        processed++;
+          update: metrics,
+          create: {
+            organizationId,
+            clientId: acc.clientId,
+            adAccountId: acc.id,
+            campaignId: insight.campaign_id,
+            adSetId: '',
+            adId: '',
+            level: 'campaign',
+            date: new Date(insight.date_start),
+            ...metrics,
+          },
+        });
+        processed += 1;
       }
     }
 
-    await prisma.syncJob.update({ where: { id: job.id },
-      data: { status: 'success', finishedAt: new Date(), recordsProcessed: processed } });
-    return { jobId: job.id, processed };
-  } catch (e: any) {
-    await prisma.syncJob.update({ where: { id: job.id },
-      data: { status: 'error', finishedAt: new Date(), errorMessage: e?.message ?? 'erro' } });
-    throw e;
+    await prisma.syncJob.update({
+      where: { id: job.id },
+      data: { status: 'success', finishedAt: new Date(), recordsProcessed: processed },
+    });
+    return { jobId: job.id, processed, accounts: accounts.length };
+  } catch (error: any) {
+    await prisma.syncJob.update({
+      where: { id: job.id },
+      data: {
+        status: 'error',
+        finishedAt: new Date(),
+        errorMessage: error?.message ?? 'Erro de sincronização',
+      },
+    });
+    throw error;
   }
 }
