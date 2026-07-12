@@ -1,22 +1,59 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres?schema=gestao_ads
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/postgres?schema=gestao_ads
+      DATABASE_SCHEMA: gestao_ads
+      JWT_SECRET: ci-jwt-secret-with-more-than-32-characters
+      JWT_REFRESH_SECRET: ci-refresh-secret-with-more-than-32-characters
+      ENCRYPTION_KEY: 1111111111111111111111111111111111111111111111111111111111111111
+      DEMO_MODE: true
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - name: API install & build
+        with:
+          node-version: 22
+
+      - name: Install API dependencies
         working-directory: apps/api
-        run: |
-          npm install
-          npx prisma generate
-          npm run typecheck
-          npm test
-          npm run build
-      - name: Web install & build
+        run: npm install
+
+      - name: Generate Prisma client
+        working-directory: apps/api
+        run: npx prisma generate
+
+      - name: Typecheck API
+        working-directory: apps/api
+        run: npm run typecheck
+
+      - name: Test API
+        working-directory: apps/api
+        run: npm test
+
+      - name: Build API
+        working-directory: apps/api
+        run: npm run build
+
+      - name: Install Web dependencies
         working-directory: apps/web
-        run: |
-          npm install
-          npm run build
+        run: npm install
+
+      - name: Typecheck Web
+        working-directory: apps/web
+        run: npm run typecheck
+
+      - name: Build Web
+        working-directory: apps/web
+        env:
+          VITE_API_BASE_URL: https://api-gestao.r2rmarketingdigital.com.br
+        run: npm run build
