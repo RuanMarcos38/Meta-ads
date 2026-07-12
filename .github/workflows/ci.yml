@@ -30,7 +30,16 @@ jobs:
 
       - name: Generate Prisma client
         working-directory: apps/api
-        run: npx prisma generate
+        run: npx prisma generate > prisma-generate.log 2>&1
+
+      - name: Upload Prisma diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prisma-generate-log
+          path: apps/api/prisma-generate.log
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Typecheck API
         working-directory: apps/api
