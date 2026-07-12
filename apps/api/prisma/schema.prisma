@@ -1,4 +1,6 @@
-generator client { provider = "prisma-client-js" }
+generator client {
+  provider = "prisma-client-js"
+}
 
 datasource db {
   provider  = "postgresql"
@@ -6,8 +8,19 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-enum Role { SUPER_ADMIN AGENCY_ADMIN MANAGER CLIENT }
-enum InsightLevel { account campaign adset ad }
+enum Role {
+  SUPER_ADMIN
+  AGENCY_ADMIN
+  MANAGER
+  CLIENT
+}
+
+enum InsightLevel {
+  account
+  campaign
+  adset
+  ad
+}
 
 model Organization {
   id        String   @id @default(uuid())
@@ -49,7 +62,7 @@ model Client {
   companyName         String?
   document            String?
   email               String?
-  phone               String?
+  phone                String?
   segment             String?
   status              String       @default("active")
   notes               String?
