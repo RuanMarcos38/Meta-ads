@@ -1,18 +1,21 @@
 {
   "name": "gestao-ads-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "prisma generate && tsc -p tsconfig.json",
     "start": "node dist/server.js",
+    "start:production": "node scripts/prepare-database.mjs && node dist/server.js",
+    "prepare:db": "node scripts/prepare-database.mjs",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "seed": "tsx prisma/seed.ts",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
@@ -23,10 +26,10 @@
     "argon2": "^0.41.1",
     "axios": "^1.7.7",
     "dayjs": "^1.11.13",
+    "dotenv": "^16.4.5",
     "fastify": "^4.28.1",
     "pdfkit": "^0.15.0",
-    "zod": "^3.23.8",
-    "dotenv": "^16.4.5"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.16.5",

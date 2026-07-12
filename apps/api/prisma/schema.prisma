@@ -1,12 +1,26 @@
-generator client { provider = "prisma-client-js" }
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
-enum Role { SUPER_ADMIN AGENCY_ADMIN MANAGER CLIENT }
-enum InsightLevel { account campaign adset ad }
+enum Role {
+  SUPER_ADMIN
+  AGENCY_ADMIN
+  MANAGER
+  CLIENT
+}
+
+enum InsightLevel {
+  account
+  campaign
+  adset
+  ad
+}
 
 model Organization {
   id        String   @id @default(uuid())
@@ -21,60 +35,67 @@ model Organization {
 }
 
 model User {
-  id             String   @id @default(uuid())
-  name           String
-  email          String   @unique
-  passwordHash   String
-  role           Role     @default(CLIENT)
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  clientId       String?
-  client         Client?  @relation(fields: [clientId], references: [id])
-  isActive       Boolean  @default(true)
-  mustChangePassword Boolean @default(false)
-  lastLoginAt    DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                 String        @id @default(uuid())
+  name               String
+  email              String        @unique
+  passwordHash       String
+  role               Role          @default(CLIENT)
+  organizationId     String?
+  organization       Organization? @relation(fields: [organizationId], references: [id])
+  clientId           String?
+  client             Client?       @relation(fields: [clientId], references: [id])
+  isActive           Boolean       @default(true)
+  mustChangePassword Boolean       @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([clientId])
 }
 
 model Client {
-  id             String   @id @default(uuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  name           String
-  companyName    String?
-  document       String?
-  email          String?
-  phone          String?
-  segment        String?
-  status         String   @default("active")
-  notes          String?
+  id                  String       @id @default(uuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  name                String
+  companyName         String?
+  document            String?
+  email               String?
+  phone                String?
+  segment             String?
+  status              String       @default("active")
+  notes               String?
   primaryResultAction String?
-  users          User[]
-  adAccounts     MetaAdAccount[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  users               User[]
+  adAccounts          MetaAdAccount[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([organizationId])
 }
 
 model MetaConnection {
-  id                   String   @id @default(uuid())
+  id                   String          @id @default(uuid())
   organizationId       String
   clientId             String?
   metaUserId           String?
   accessTokenEncrypted String
   tokenExpiresAt       DateTime?
   scopes               String?
-  status               String   @default("active")
+  status               String          @default("active")
   adAccounts           MetaAdAccount[]
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  @@index([organizationId, clientId])
 }
 
 model MetaAdAccount {
-  id             String   @id @default(uuid())
+  id             String         @id @default(uuid())
   organizationId String
   clientId       String
-  client         Client   @relation(fields: [clientId], references: [id])
+  client         Client         @relation(fields: [clientId], references: [id])
   connectionId   String
   connection     MetaConnection @relation(fields: [connectionId], references: [id])
   accountId      String
@@ -82,14 +103,16 @@ model MetaAdAccount {
   currency       String?
   timezone       String?
   accountStatus  Int?
-  isActive       Boolean  @default(true)
+  isActive       Boolean        @default(true)
   campaigns      Campaign[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([organizationId, clientId])
 }
 
 model Campaign {
-  id              String   @id @default(uuid())
+  id              String        @id @default(uuid())
   organizationId  String
   clientId        String
   adAccountId     String
@@ -105,13 +128,15 @@ model Campaign {
   startTime       DateTime?
   stopTime        DateTime?
   adSets          AdSet[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
   @@unique([adAccountId, metaCampaignId])
+  @@index([organizationId, clientId])
 }
 
 model AdSet {
-  id               String  @id @default(uuid())
+  id               String   @id @default(uuid())
   campaignId       String
   campaign         Campaign @relation(fields: [campaignId], references: [id])
   metaAdsetId      String
@@ -125,13 +150,14 @@ model AdSet {
   ads              Ad[]
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
   @@unique([campaignId, metaAdsetId])
 }
 
 model Ad {
-  id              String @id @default(uuid())
+  id              String   @id @default(uuid())
   adSetId         String
-  adSet           AdSet  @relation(fields: [adSetId], references: [id])
+  adSet           AdSet    @relation(fields: [adSetId], references: [id])
   campaignId      String
   metaAdId        String
   name            String
@@ -140,54 +166,59 @@ model Ad {
   creativeId      String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
   @@unique([adSetId, metaAdId])
 }
 
 model InsightDaily {
-  id             String   @id @default(uuid())
-  organizationId String
-  clientId       String
-  adAccountId    String
-  campaignId     String?
-  adSetId        String?
-  adId           String?
-  level          InsightLevel
-  date           DateTime
-  spend          Decimal  @default(0)
-  impressions    Int      @default(0)
-  reach          Int      @default(0)
-  frequency      Decimal  @default(0)
-  clicks         Int      @default(0)
-  inlineLinkClicks Int    @default(0)
-  ctr            Decimal  @default(0)
-  cpc            Decimal  @default(0)
-  cpm            Decimal  @default(0)
-  leads          Int      @default(0)
-  conversations  Int      @default(0)
-  purchases      Int      @default(0)
-  revenue        Decimal  @default(0)
-  costPerLead    Decimal  @default(0)
-  costPerConversation Decimal @default(0)
-  rawActionsJson       Json?
-  rawCostPerActionJson Json?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                   String       @id @default(uuid())
+  organizationId       String
+  clientId             String
+  adAccountId          String
+  campaignId           String?
+  adSetId               String?
+  adId                  String?
+  level                 InsightLevel
+  date                  DateTime
+  spend                 Decimal      @default(0)
+  impressions           Int          @default(0)
+  reach                 Int          @default(0)
+  frequency             Decimal      @default(0)
+  clicks                Int          @default(0)
+  inlineLinkClicks      Int          @default(0)
+  ctr                   Decimal      @default(0)
+  cpc                   Decimal      @default(0)
+  cpm                   Decimal      @default(0)
+  leads                 Int          @default(0)
+  conversations         Int          @default(0)
+  purchases             Int          @default(0)
+  revenue               Decimal      @default(0)
+  costPerLead           Decimal      @default(0)
+  costPerConversation   Decimal      @default(0)
+  rawActionsJson        Json?
+  rawCostPerActionJson  Json?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
   @@unique([level, date, adAccountId, campaignId, adSetId, adId])
   @@index([clientId, date])
+  @@index([organizationId, date])
 }
 
 model SyncJob {
-  id              String    @id @default(uuid())
-  organizationId  String
-  clientId        String?
-  adAccountId     String?
-  type            String
-  status          String    @default("running")
-  startedAt       DateTime  @default(now())
-  finishedAt      DateTime?
-  errorMessage    String?
-  recordsProcessed Int      @default(0)
-  createdBy       String?
+  id               String   @id @default(uuid())
+  organizationId   String
+  clientId          String?
+  adAccountId       String?
+  type               String
+  status             String   @default("running")
+  startedAt          DateTime @default(now())
+  finishedAt         DateTime?
+  errorMessage       String?
+  recordsProcessed   Int      @default(0)
+  createdBy          String?
+
+  @@index([organizationId, startedAt])
 }
 
 model Report {
@@ -226,4 +257,6 @@ model AuditLog {
   userAgent      String?
   metadataJson   Json?
   createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
 }
