@@ -2,7 +2,10 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { fail } from './response.js';
 
 export interface AuthUser {
-  id: string; role: string; organizationId?: string; clientId?: string;
+  id: string;
+  role: string;
+  organizationId?: string;
+  clientId?: string;
 }
 
 export function requireAuth(roles?: string[]) {
@@ -19,8 +22,9 @@ export function requireAuth(roles?: string[]) {
   };
 }
 
-// Multi-tenant: um CLIENT só enxerga o próprio clientId
+// CLIENT e MANAGER ficam presos ao clientId gravado no token.
+// Somente administradores podem selecionar outro cliente da mesma organização.
 export function scopeClient(user: AuthUser, requestedClientId?: string): string | undefined {
-  if (user.role === 'CLIENT') return user.clientId;
-  return requestedClientId; // admin/manager podem filtrar por qualquer cliente
+  if (user.role === 'CLIENT' || user.role === 'MANAGER') return user.clientId;
+  return requestedClientId;
 }
