@@ -14,15 +14,15 @@ jobs:
       DATABASE_SCHEMA: gestao_ads
       JWT_SECRET: ci-jwt-secret-with-more-than-32-characters
       JWT_REFRESH_SECRET: ci-refresh-secret-with-more-than-32-characters
-      ENCRYPTION_KEY: 1111111111111111111111111111111111111111111111111111111111111111
-      DEMO_MODE: true
+      ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
+      DEMO_MODE: "true"
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
 
       - name: Install API dependencies
         working-directory: apps/api
