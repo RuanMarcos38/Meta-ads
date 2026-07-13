@@ -2,6 +2,8 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
+RUN apk add --no-cache openssl ca-certificates
+
 COPY apps/api/package*.json ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
@@ -15,6 +17,8 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 
 WORKDIR /app
+
+RUN apk add --no-cache openssl ca-certificates
 
 ENV NODE_ENV=production
 ENV PORT=3333
