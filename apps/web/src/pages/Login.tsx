@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../store';
 
+const BUILD_ID = '2026.07.27.2';
+
 type ApiErrorPayload = {
   error?: {
     code?: string;
@@ -44,9 +46,9 @@ export default function Login() {
       const apiMessage = payload?.error?.message;
 
       if (!caughtError.response) {
-        setError('Não foi possível conectar à API. Verifique se o backend está online.');
+        setError('Não foi possível conectar à API. O backend precisa estar online e com o domínio configurado.');
       } else if (status === 401) {
-        setError('E-mail ou senha inválidos.');
+        setError('A API recusou o acesso. Verifique se o backend está conectado ao banco e ao schema gestao_ads corretos.');
       } else if (status === 429) {
         setError('Muitas tentativas de acesso. Aguarde um minuto e tente novamente.');
       } else if (status === 503 || payload?.error?.code === 'DATABASE_UNAVAILABLE') {
@@ -61,7 +63,11 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
-      <form onSubmit={submit} className="w-full max-w-sm bg-brand-card border border-brand-border rounded-2xl p-8 shadow-2xl">
+      <form
+        onSubmit={submit}
+        data-build-id={BUILD_ID}
+        className="w-full max-w-sm bg-brand-card border border-brand-border rounded-2xl p-8 shadow-2xl"
+      >
         <h1 className="text-2xl font-bold text-center mb-1 bg-gradient-to-r from-brand-blue to-brand-purple bg-clip-text text-transparent">Gestão Ads</h1>
         <p className="text-center text-sm text-gray-400 mb-6">R2R Marketing Digital</p>
 
@@ -94,6 +100,7 @@ export default function Login() {
         >
           {loading ? 'Entrando...' : 'Entrar'}
         </button>
+        <p className="mt-4 text-center text-[10px] text-gray-600">v{BUILD_ID}</p>
       </form>
     </div>
   );
