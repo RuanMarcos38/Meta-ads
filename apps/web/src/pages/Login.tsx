@@ -1,7 +1,15 @@
 import { useState } from 'react';
+import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../store';
+
+type ApiErrorPayload = {
+  error?: {
+    code?: string;
+    message?: string;
+  };
+};
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -25,8 +33,27 @@ export default function Login() {
       localStorage.setItem('refresh', data.data.refresh);
       setUser(data.data.user);
       navigate('/');
-    } catch {
-      setError('E-mail ou senha inválidos.');
+    } catch (caughtError) {
+      if (!axios.isAxiosError(caughtError)) {
+        setError('Não foi possível concluir o login. Tente novamente.');
+        return;
+      }
+
+      const status = caughtError.response?.status;
+      const payload = caughtError.response?.data as ApiErrorPayload | undefined;
+      const apiMessage = payload?.error?.message;
+
+      if (!caughtError.response) {
+        setError('Não foi possível conectar à API. Verifique se o backend está online.');
+      } else if (status === 401) {
+        setError('E-mail ou senha inválidos.');
+      } else if (status === 429) {
+        setError('Muitas tentativas de acesso. Aguarde um minuto e tente novamente.');
+      } else if (status === 503 || payload?.error?.code === 'DATABASE_UNAVAILABLE') {
+        setError('A API está online, mas o banco de dados não respondeu.');
+      } else {
+        setError(apiMessage || 'Falha ao acessar o sistema. Tente novamente.');
+      }
     } finally {
       setLoading(false);
     }
@@ -60,7 +87,7 @@ export default function Login() {
           className="w-full mb-4 mt-1 px-3 py-2 rounded-lg bg-brand-bg border border-brand-border outline-none focus:border-brand-blue"
         />
 
-        {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+        {error && <p className="text-red-400 text-sm mb-3" role="alert">{error}</p>}
         <button
           disabled={loading}
           className="w-full py-2.5 rounded-lg bg-gradient-to-r from-brand-blue to-brand-purple font-semibold hover:opacity-90 disabled:opacity-50"
