@@ -28,6 +28,11 @@ function withSchema(value, schema) {
   return parsed.toString();
 }
 
+function isEnabled(value, fallback = false) {
+  if (value == null || value === '') return fallback;
+  return value.trim().toLowerCase() === 'true';
+}
+
 function run(label, command, args) {
   console.log(`[startup] ${label}`);
   const result = spawnSync(command, args, {
@@ -63,7 +68,7 @@ try {
 const parsed = new URL(process.env.DATABASE_URL);
 console.log(`[startup] Banco: ${parsed.hostname}/${parsed.pathname.replace(/^\//, '') || 'postgres'} | schema=${schema}`);
 
-if ((process.env.PRISMA_DB_PUSH ?? 'true').toLowerCase() !== 'false') {
+if (isEnabled(process.env.PRISMA_DB_PUSH, true)) {
   run('Sincronizando estrutura isolada do Prisma', 'npx', [
     '--no-install',
     'prisma',
@@ -73,6 +78,12 @@ if ((process.env.PRISMA_DB_PUSH ?? 'true').toLowerCase() !== 'false') {
   ]);
 }
 
-if ((process.env.RUN_SEED_ON_START ?? 'false').toLowerCase() === 'true') {
-  run('Executando seed administrativo', 'npm', ['run', 'seed']);
+const seedRequested = isEnabled(process.env.RUN_SEED_ON_START, false);
+const seedPasswordConfigured = Boolean(process.env.SEED_ADMIN_PASSWORD?.trim());
+
+if (seedRequested || seedPasswordConfigured) {
+  run('Garantindo administrador inicial', 'npm', ['run', 'seed']);
+} else {
+  console.warn('[startup] Seed administrativo não executado.');
+  console.warn('[startup] Para criar o primeiro acesso, configure SEED_ADMIN_PASSWORD com 12 ou mais caracteres.');
 }
