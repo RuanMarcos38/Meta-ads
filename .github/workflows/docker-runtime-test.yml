@@ -1,0 +1,86 @@
+name: Docker Runtime Verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build --pull -t gestao-ads-api:verification .
+
+      - name: Start isolated PostgreSQL
+        run: |
+          set -euo pipefail
+          docker network create gestao-ads-verification
+          docker run -d --name gestao-ads-db --network gestao-ads-verification \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            postgres:16-alpine
+          for attempt in $(seq 1 30); do
+            if docker exec gestao-ads-db pg_isready -U postgres -d postgres; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs gestao-ads-db
+          exit 1
+
+      - name: Start production API container
+        run: |
+          set -euo pipefail
+          docker run -d --name gestao-ads-api --network gestao-ads-verification -p 3333:3333 \
+            -e NODE_ENV=production \
+            -e PORT=3333 \
+            -e DATABASE_SCHEMA=gestao_ads \
+            -e DATABASE_URL='postgresql://postgres:postgres@gestao-ads-db:5432/postgres?schema=gestao_ads' \
+            -e DIRECT_URL='postgresql://postgres:postgres@gestao-ads-db:5432/postgres?schema=gestao_ads' \
+            -e JWT_SECRET='verification-jwt-secret-with-at-least-32-characters' \
+            -e JWT_REFRESH_SECRET='verification-refresh-secret-with-at-least-32-characters' \
+            -e ENCRYPTION_KEY='1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' \
+            -e CORS_ORIGINS='https://gestao.r2rmarketingdigital.com.br' \
+            -e SEED_ADMIN_EMAIL='admin@r2rmarketingdigital.com.br' \
+            -e SEED_ADMIN_PASSWORD='SenhaTemporaria123!' \
+            -e FORCE_ADMIN_PASSWORD_RESET=true \
+            gestao-ads-api:verification
+
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3333/health >/tmp/health.json; then
+              cat /tmp/health.json | jq .
+              exit 0
+            fi
+            if ! docker inspect -f '{{.State.Running}}' gestao-ads-api | grep -q true; then
+              docker logs gestao-ads-api
+              exit 1
+            fi
+            sleep 2
+          done
+          docker logs gestao-ads-api
+          exit 1
+
+      - name: Verify seeded login and API readiness
+        run: |
+          set -euo pipefail
+          status="$(curl -fsS http://127.0.0.1:3333/auth/status)"
+          echo "$status" | jq .
+          echo "$status" | jq -e '.success == true and .data.ready == true and .data.activeUsers > 0' >/dev/null
+
+          login="$(curl -fsS -H 'Content-Type: application/json' \
+            -d '{"email":"admin@r2rmarketingdigital.com.br","password":"SenhaTemporaria123!"}' \
+            http://127.0.0.1:3333/auth/login)"
+          echo "$login" | jq '{success, user: .data.user, hasToken: (.data.token | length > 20), hasRefresh: (.data.refresh | length > 20)}'
+          echo "$login" | jq -e '.success == true and (.data.token | length > 20) and (.data.refresh | length > 20)' >/dev/null
+
+      - name: Show container logs
+        if: always()
+        run: |
+          docker logs gestao-ads-api || true
+          docker logs gestao-ads-db || true
