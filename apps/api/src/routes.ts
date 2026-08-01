@@ -8,41 +8,81 @@ import { env } from './config/env.js';
 import { runSync } from './modules/meta/syncService.js';
 import { demoSummary, demoCampaigns, demoDaily } from './modules/demo/demoData.js';
 
+const VERSION = '1.3.0';
 const asNumber = (value: unknown) => Number(value ?? 0);
 
+function configurationFailure(reply: any) {
+  return reply.code(503).send(fail(
+    'CONFIGURATION_ERROR',
+    'A API está online, mas existem variáveis inválidas no EasyPanel.',
+    { issues: env.configurationErrors },
+  ));
+}
+
 export async function registerRoutes(app: FastifyInstance) {
-  // HEALTH
+  // LIVENESS — não depende de banco, seed ou integrações externas.
+  app.get('/live', async () => ok({
+    status: 'up',
+    service: 'gestao-ads-api',
+    version: VERSION,
+    time: new Date().toISOString(),
+  }));
+
+  app.get('/', async () => ok({
+    service: 'gestao-ads-api',
+    status: 'online',
+    version: VERSION,
+    health: '/health',
+    liveness: '/live',
+  }));
+
+  // READINESS
   app.get('/health', async (_req, reply) => {
+    if (env.configurationErrors.length) return configurationFailure(reply);
+
     try {
       await prisma.$queryRawUnsafe('SELECT 1');
       return ok({
         status: 'ok',
         database: 'connected',
         schema: env.databaseSchema,
-        version: '1.1.1',
+        projectRef: env.supabaseProjectRef,
+        version: VERSION,
         time: new Date().toISOString(),
       });
     } catch {
-      return reply.code(503).send(fail('DATABASE_UNAVAILABLE', 'API online, mas o banco de dados não respondeu.'));
+      return reply.code(503).send(fail(
+        'DATABASE_UNAVAILABLE',
+        'A API está online, mas não conseguiu autenticar no banco Supabase.',
+        {
+          schema: env.databaseSchema,
+          projectRef: env.supabaseProjectRef,
+          databaseConfigured: Boolean(env.databaseUrl),
+        },
+      ));
     }
   });
 
   app.get('/auth/status', async (_req, reply) => {
+    if (env.configurationErrors.length) return configurationFailure(reply);
+
     try {
       const activeUsers = await prisma.user.count({ where: { isActive: true } });
       return ok({
         ready: activeUsers > 0,
         activeUsers,
         schema: env.databaseSchema,
-        version: '1.1.1',
+        version: VERSION,
       });
     } catch {
-      return reply.code(503).send(fail('DATABASE_UNAVAILABLE', 'API online, mas o banco de dados não respondeu.'));
+      return reply.code(503).send(fail('DATABASE_UNAVAILABLE', 'A API está online, mas o banco de dados não respondeu.'));
     }
   });
 
   // AUTH
   app.post('/auth/login', async (req, reply) => {
+    if (env.configurationErrors.length) return configurationFailure(reply);
+
     const body = z.object({ email: z.string().email(), password: z.string().min(1) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Dados inválidos.'));
 
@@ -101,6 +141,8 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/refresh', async (req, reply) => {
+    if (env.configurationErrors.length) return configurationFailure(reply);
+
     const body = z.object({ refresh: z.string().min(1) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Refresh token ausente.'));
 
