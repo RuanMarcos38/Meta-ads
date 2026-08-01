@@ -10,8 +10,9 @@ import Clients from './pages/Clients';
 import { useAuth } from './store';
 
 function Private({ children }: { children: React.ReactNode }) {
-  const user = useAuth((s) => s.user);
-  return user ? <>{children}</> : <Navigate to="/login" />;
+  const user = useAuth((state) => state.user);
+  const token = localStorage.getItem('token');
+  return user && token ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -24,6 +25,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="campanhas" element={<Campaigns />} />
           <Route path="clientes" element={<Clients />} />
         </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>
