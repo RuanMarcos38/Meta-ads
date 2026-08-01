@@ -11,6 +11,8 @@ const DATABASE_ALIASES = [
   'PG_DATABASE_URL',
 ] as const;
 
+const DEFAULT_SUPABASE_PROJECT_REF = 'iqrnytsgwaiegddfxfjs';
+
 function firstConfigured(keys: readonly string[]): string {
   for (const key of keys) {
     const value = process.env[key]?.trim();
@@ -30,8 +32,31 @@ function databaseUrlWithSchema(value: string, schema: string): string {
   return parsed.toString();
 }
 
+function isLocalDatabaseHost(hostname: string): boolean {
+  return ['localhost', '127.0.0.1', '::1', 'gestao-ads-db'].includes(hostname);
+}
+
+function assertExpectedSupabaseProject(value: string, expectedRef: string): void {
+  if (!value) return;
+
+  const parsed = new URL(value);
+  if (isLocalDatabaseHost(parsed.hostname)) return;
+
+  const username = decodeURIComponent(parsed.username || '');
+  const isDirectHost = parsed.hostname === `db.${expectedRef}.supabase.co`;
+  const isPoolerHost = parsed.hostname.endsWith('.pooler.supabase.com')
+    && username.endsWith(`.${expectedRef}`);
+
+  if (!isDirectHost && !isPoolerHost) {
+    throw new Error(
+      `DATABASE_URL deve apontar exclusivamente para o projeto Supabase CRM R2 MARKETING DIGITAL (${expectedRef}).`,
+    );
+  }
+}
+
 const nodeEnv = process.env.NODE_ENV?.trim() || 'development';
 const databaseSchema = process.env.DATABASE_SCHEMA?.trim() || 'gestao_ads';
+const supabaseProjectRef = process.env.SUPABASE_PROJECT_REF?.trim() || DEFAULT_SUPABASE_PROJECT_REF;
 
 // Regra de segurança: este repositório nunca deve escrever no schema public do CRM.
 if (databaseSchema !== 'gestao_ads') {
@@ -53,6 +78,9 @@ const isProduction = nodeEnv === 'production';
 
 if (isProduction) {
   if (!databaseUrl) throw new Error('DATABASE_URL não foi configurada no EasyPanel.');
+  assertExpectedSupabaseProject(databaseUrl, supabaseProjectRef);
+  assertExpectedSupabaseProject(directUrl, supabaseProjectRef);
+
   if (jwtSecret.length < 32 || jwtSecret === 'dev-secret') {
     throw new Error('JWT_SECRET precisa ter pelo menos 32 caracteres em produção.');
   }
@@ -69,6 +97,7 @@ export const env = {
   isProduction,
   port: Number(process.env.PORT ?? 3333),
   databaseSchema,
+  supabaseProjectRef,
   databaseUrl,
   directUrl,
   jwtSecret,
