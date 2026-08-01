@@ -19,7 +19,10 @@ jobs:
             gestao.r2rmarketingdigital.com.br \
             api-gestao.r2rmarketingdigital.com.br \
             n8n-n8n.ke4n49.easypanel.host \
-            evolution-evolution-api.ke4n49.easypanel.host; do
+            evolution-evolution-api.ke4n49.easypanel.host \
+            db.iqrnytsgwaiegddfxfjs.supabase.co \
+            aws-0-us-west-2.pooler.supabase.com \
+            aws-0-us-west-1.pooler.supabase.com; do
             echo "===== ${host} ====="
             getent ahosts "$host" || true
           done
