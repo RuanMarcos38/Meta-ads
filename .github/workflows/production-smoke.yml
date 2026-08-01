@@ -1,0 +1,74 @@
+name: Production Smoke Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gestao-ads-production-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check frontend release
+        env:
+          EXPECTED_VERSION: 2026.08.01.1
+          FRONTEND_URL: https://gestao.r2rmarketingdigital.com.br
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            body="$(curl -fsSL --connect-timeout 10 --max-time 20 "${FRONTEND_URL}/deploy-version.txt?attempt=${attempt}" 2>/dev/null || true)"
+            if printf '%s' "$body" | grep -Fq "$EXPECTED_VERSION"; then
+              echo "Frontend publicado na versão ${EXPECTED_VERSION}."
+              exit 0
+            fi
+            echo "Tentativa ${attempt}/30: versão publicada ainda não encontrada. Resposta: ${body:-indisponível}"
+            sleep 10
+          done
+          echo "A versão esperada do frontend não foi publicada."
+          exit 1
+
+      - name: Check API and database
+        env:
+          API_URL: https://api-gestao.r2rmarketingdigital.com.br
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            body="$(curl -fsSL --connect-timeout 10 --max-time 20 "${API_URL}/health?attempt=${attempt}" 2>/dev/null || true)"
+            if printf '%s' "$body" | jq -e '.success == true and .data.status == "ok" and .data.database == "connected" and .data.schema == "gestao_ads"' >/dev/null 2>&1; then
+              echo "API e banco conectados no schema gestao_ads."
+              exit 0
+            fi
+            echo "Tentativa ${attempt}/30: API ou banco ainda indisponível. Resposta: ${body:-indisponível}"
+            sleep 10
+          done
+          echo "A API não confirmou conexão saudável com o banco."
+          exit 1
+
+      - name: Check authentication readiness
+        env:
+          API_URL: https://api-gestao.r2rmarketingdigital.com.br
+        run: |
+          set -euo pipefail
+          body="$(curl -fsSL --connect-timeout 10 --max-time 20 "${API_URL}/auth/status")"
+          printf '%s' "$body" | jq -e '.success == true and .data.ready == true and .data.activeUsers > 0 and .data.schema == "gestao_ads"' >/dev/null
+          echo "Autenticação inicializada com usuário ativo."
+
+      - name: Check frontend CORS access
+        env:
+          API_URL: https://api-gestao.r2rmarketingdigital.com.br
+          FRONTEND_ORIGIN: https://gestao.r2rmarketingdigital.com.br
+        run: |
+          set -euo pipefail
+          headers="$(mktemp)"
+          curl -fsSL --connect-timeout 10 --max-time 20 -D "$headers" -o /dev/null -H "Origin: ${FRONTEND_ORIGIN}" "${API_URL}/health"
+          tr -d '\r' < "$headers" | grep -iF "access-control-allow-origin: ${FRONTEND_ORIGIN}"
+          echo "CORS permite o domínio oficial do frontend."
