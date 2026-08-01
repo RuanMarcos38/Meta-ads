@@ -1,0 +1,36 @@
+name: EasyPanel Post-Fix Monitor
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Wait for API deployment
+        env:
+          API_URL: https://api-gestao.r2rmarketingdigital.com.br
+        run: |
+          set -u
+          for attempt in $(seq 1 24); do
+            echo "===== tentativa ${attempt}/24 $(date -u +%FT%TZ) ====="
+            live_status="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/live.txt -w '%{http_code}' "${API_URL}/live" || true)"
+            health_status="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/health.txt -w '%{http_code}' "${API_URL}/health" || true)"
+            echo "live_status=${live_status} body=$(head -c 600 /tmp/live.txt 2>/dev/null || true)"
+            echo "health_status=${health_status} body=$(head -c 1200 /tmp/health.txt 2>/dev/null || true)"
+
+            if [ "$live_status" = "200" ]; then
+              echo "A nova API está publicada e acessível."
+              exit 0
+            fi
+
+            sleep 15
+          done
+
+          echo "A API não ficou acessível dentro da janela de monitoramento."
+          exit 1
