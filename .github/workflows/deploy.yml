@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,12 +15,32 @@ concurrency:
 jobs:
   deploy-frontend:
     runs-on: ubuntu-latest
+    env:
+      HOSTINGER_SFTP_HOST: ${{ secrets.HOSTINGER_SFTP_HOST }}
+      HOSTINGER_SFTP_USER: ${{ secrets.HOSTINGER_SFTP_USER }}
+      HOSTINGER_SFTP_PASSWORD: ${{ secrets.HOSTINGER_SFTP_PASSWORD }}
+      HOSTINGER_SFTP_PATH: ${{ secrets.HOSTINGER_SFTP_PATH }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Validate deployment configuration
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in HOSTINGER_SFTP_HOST HOSTINGER_SFTP_USER HOSTINGER_SFTP_PASSWORD HOSTINGER_SFTP_PATH; do
+            if [ -z "${!name:-}" ]; then
+              echo "Secret ausente: ${name}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Configure os quatro secrets de SFTP antes de publicar."
+            exit 1
+          fi
 
       - name: Build frontend
         working-directory: apps/web
@@ -33,7 +54,6 @@ jobs:
           grep -R "2026.08.01.1" dist/assets >/dev/null
 
       - name: Deploy frontend via SFTP
-        if: ${{ secrets.HOSTINGER_SFTP_HOST != '' && secrets.HOSTINGER_SFTP_USER != '' && secrets.HOSTINGER_SFTP_PASSWORD != '' && secrets.HOSTINGER_SFTP_PATH != '' }}
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
           server: ${{ secrets.HOSTINGER_SFTP_HOST }}
@@ -44,7 +64,6 @@ jobs:
           sftp_only: true
 
       - name: Deploy SPA rewrite file
-        if: ${{ secrets.HOSTINGER_SFTP_HOST != '' && secrets.HOSTINGER_SFTP_USER != '' && secrets.HOSTINGER_SFTP_PASSWORD != '' && secrets.HOSTINGER_SFTP_PATH != '' }}
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
           server: ${{ secrets.HOSTINGER_SFTP_HOST }}
@@ -54,8 +73,20 @@ jobs:
           remote_path: ${{ secrets.HOSTINGER_SFTP_PATH }}
           sftp_only: true
 
-      - name: Deployment configuration missing
-        if: ${{ secrets.HOSTINGER_SFTP_HOST == '' || secrets.HOSTINGER_SFTP_USER == '' || secrets.HOSTINGER_SFTP_PASSWORD == '' || secrets.HOSTINGER_SFTP_PATH == '' }}
+      - name: Verify published frontend
+        env:
+          EXPECTED_VERSION: 2026.08.01.1
+          FRONTEND_URL: https://gestao.r2rmarketingdigital.com.br
         run: |
-          echo "Deploy não executado: configure os quatro secrets HOSTINGER_SFTP_HOST, HOSTINGER_SFTP_USER, HOSTINGER_SFTP_PASSWORD e HOSTINGER_SFTP_PATH."
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            body="$(curl -fsSL --connect-timeout 10 --max-time 20 "${FRONTEND_URL}/deploy-version.txt?sha=${GITHUB_SHA}&attempt=${attempt}" 2>/dev/null || true)"
+            if printf '%s' "$body" | grep -Fq "$EXPECTED_VERSION"; then
+              echo "Frontend publicado e validado na versão ${EXPECTED_VERSION}."
+              exit 0
+            fi
+            echo "Tentativa ${attempt}/12: aguardando publicação."
+            sleep 10
+          done
+          echo "O upload terminou, mas a versão publicada não foi confirmada."
           exit 1
