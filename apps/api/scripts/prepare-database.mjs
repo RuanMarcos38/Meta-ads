@@ -21,11 +21,32 @@ function firstConfigured(keys) {
   return null;
 }
 
+function decodeSafely(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizePostgresUrl(value) {
+  const trimmed = value.trim();
+  if (!/^postgres(ql)?:\/\//i.test(trimmed)) return trimmed;
+
+  const match = trimmed.match(
+    /^(postgres(?:ql)?:\/\/)([^:/?#]+):(.+)@([^/?#:]+)(:\d+)?(\/[^?]*)?(\?.*)?$/i,
+  );
+  if (!match) return trimmed;
+
+  const [, protocol, rawUsername, rawPassword, hostname, port = '', pathname = '/postgres', query = ''] = match;
+  return `${protocol}${encodeURIComponent(decodeSafely(rawUsername))}:${encodeURIComponent(decodeSafely(rawPassword))}@${hostname}${port}${pathname || '/postgres'}${query}`;
+}
+
 function withSchema(value, schema) {
   if (!/^postgres(ql)?:\/\//i.test(value)) {
     throw new Error('A conexão informada não é uma URL PostgreSQL válida.');
   }
-  const parsed = new URL(value);
+  const parsed = new URL(normalizePostgresUrl(value));
   parsed.searchParams.set('schema', schema);
   return parsed.toString();
 }
