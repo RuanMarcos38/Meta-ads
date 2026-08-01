@@ -61,7 +61,12 @@ function run(label, command, args) {
     stdio: 'inherit',
     env: process.env,
   });
-  if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1);
+
+  if ((result.status ?? 1) === 0) return true;
+
+  console.error(`[startup] Falha em: ${label}. Código: ${result.status ?? 1}.`);
+  console.error('[startup] A API continuará subindo para expor /health e facilitar o diagnóstico no EasyPanel.');
+  return false;
 }
 
 const schema = process.env.DATABASE_SCHEMA?.trim() || 'gestao_ads';
@@ -97,8 +102,9 @@ console.log(
   `[startup] Projeto Supabase: ${expectedProjectRef} | banco=${parsed.hostname}/${parsed.pathname.replace(/^\//, '') || 'postgres'} | schema=${schema}`,
 );
 
+let databasePrepared = true;
 if (isEnabled(process.env.PRISMA_DB_PUSH, true)) {
-  run('Sincronizando estrutura isolada do Prisma', 'npx', [
+  databasePrepared = run('Sincronizando estrutura isolada do Prisma', 'npx', [
     '--no-install',
     'prisma',
     'db',
@@ -110,8 +116,10 @@ if (isEnabled(process.env.PRISMA_DB_PUSH, true)) {
 const seedRequested = isEnabled(process.env.RUN_SEED_ON_START, false);
 const seedPasswordConfigured = Boolean(process.env.SEED_ADMIN_PASSWORD?.trim());
 
-if (seedRequested || seedPasswordConfigured) {
+if ((seedRequested || seedPasswordConfigured) && databasePrepared) {
   run('Garantindo administrador inicial', 'npm', ['run', 'seed']);
+} else if (seedRequested || seedPasswordConfigured) {
+  console.warn('[startup] Seed administrativo ignorado porque a conexão/preparação do banco falhou.');
 } else {
   console.warn('[startup] Seed administrativo não executado.');
   console.warn('[startup] Para criar o primeiro acesso, configure SEED_ADMIN_PASSWORD com 12 ou mais caracteres.');
