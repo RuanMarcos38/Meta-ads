@@ -5,7 +5,7 @@ window.APP_CONFIG = {
   DEMO_MODE: false,
   DEFAULT_LOGIN: {
     email: 'admin@r2rmarketingdigital.com.br',
-    password: '123456'
+    password: ''
   },
   WHATSAPP_SUPPORT: '5547996753735'
 };

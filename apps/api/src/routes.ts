@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify';
-import argon2 from 'argon2';
 import { z } from 'zod';
 import { prisma } from './shared/prisma.js';
 import { ok, fail } from './shared/response.js';
 import { requireAuth, scopeClient, AuthUser } from './shared/auth.js';
+import { verifyPassword } from './shared/password.js';
 import { env } from './config/env.js';
 import { runSync } from './modules/meta/syncService.js';
 import { demoSummary, demoCampaigns, demoDaily } from './modules/demo/demoData.js';
@@ -19,8 +19,22 @@ export async function registerRoutes(app: FastifyInstance) {
         status: 'ok',
         database: 'connected',
         schema: env.databaseSchema,
-        version: '1.1.0',
+        version: '1.1.1',
         time: new Date().toISOString(),
+      });
+    } catch {
+      return reply.code(503).send(fail('DATABASE_UNAVAILABLE', 'API online, mas o banco de dados não respondeu.'));
+    }
+  });
+
+  app.get('/auth/status', async (_req, reply) => {
+    try {
+      const activeUsers = await prisma.user.count({ where: { isActive: true } });
+      return ok({
+        ready: activeUsers > 0,
+        activeUsers,
+        schema: env.databaseSchema,
+        version: '1.1.1',
       });
     } catch {
       return reply.code(503).send(fail('DATABASE_UNAVAILABLE', 'API online, mas o banco de dados não respondeu.'));
@@ -32,17 +46,33 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = z.object({ email: z.string().email(), password: z.string().min(1) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Dados inválidos.'));
 
-    const user = await prisma.user.findUnique({ where: { email: body.data.email.toLowerCase() } });
+    const email = body.data.email.trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !user.isActive) {
       return reply.code(401).send(fail('INVALID_CREDENTIALS', 'E-mail ou senha inválidos.'));
     }
 
-    const valid = await argon2.verify(user.passwordHash, body.data.password);
-    if (!valid) return reply.code(401).send(fail('INVALID_CREDENTIALS', 'E-mail ou senha inválidos.'));
+    const password = await verifyPassword(body.data.password, user.passwordHash);
+    if (!password.valid) {
+      return reply.code(401).send(fail('INVALID_CREDENTIALS', 'E-mail ou senha inválidos.'));
+    }
 
-    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: new Date(),
+        ...(password.upgradedHash ? { passwordHash: password.upgradedHash } : {}),
+      },
+    });
     await prisma.auditLog.create({
-      data: { organizationId: user.organizationId, userId: user.id, action: 'LOGIN', ip: req.ip },
+      data: {
+        organizationId: user.organizationId,
+        userId: user.id,
+        action: 'LOGIN',
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        metadataJson: password.upgradedHash ? { legacyPasswordHashUpgraded: true } : undefined,
+      },
     });
 
     const payload: AuthUser = {
@@ -202,23 +232,25 @@ export async function registerRoutes(app: FastifyInstance) {
         })
       : [];
 
-    const totals = new Map<string, { spend: number; impressions: number; clicks: number; leads: number }>();
+    const totals = new Map<string, { spend: number; impressions: number; clicks: number; leads: number; conversations: number }>();
     for (const row of insights) {
       if (!row.campaignId) continue;
-      const current = totals.get(row.campaignId) ?? { spend: 0, impressions: 0, clicks: 0, leads: 0 };
+      const current = totals.get(row.campaignId) ?? { spend: 0, impressions: 0, clicks: 0, leads: 0, conversations: 0 };
       current.spend += asNumber(row.spend);
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.leads += row.leads;
+      current.conversations += row.conversations;
       totals.set(row.campaignId, current);
     }
 
     return ok(campaigns.map((campaign) => {
-      const metric = totals.get(campaign.metaCampaignId) ?? { spend: 0, impressions: 0, clicks: 0, leads: 0 };
+      const metric = totals.get(campaign.metaCampaignId) ?? { spend: 0, impressions: 0, clicks: 0, leads: 0, conversations: 0 };
       return {
         ...campaign,
         ...metric,
         ctr: metric.impressions ? (metric.clicks / metric.impressions) * 100 : 0,
+        cpc: metric.clicks ? metric.spend / metric.clicks : 0,
       };
     }));
   });
