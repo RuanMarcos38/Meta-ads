@@ -11,6 +11,8 @@ const aliases = [
   'PG_DATABASE_URL',
 ];
 
+const DEFAULT_SUPABASE_PROJECT_REF = 'iqrnytsgwaiegddfxfjs';
+
 function firstConfigured(keys) {
   for (const key of keys) {
     const value = process.env[key]?.trim();
@@ -28,6 +30,26 @@ function withSchema(value, schema) {
   return parsed.toString();
 }
 
+function isLocalDatabaseHost(hostname) {
+  return ['localhost', '127.0.0.1', '::1', 'gestao-ads-db'].includes(hostname);
+}
+
+function assertExpectedSupabaseProject(value, expectedRef) {
+  const parsed = new URL(value);
+  if (isLocalDatabaseHost(parsed.hostname)) return;
+
+  const username = decodeURIComponent(parsed.username || '');
+  const isDirectHost = parsed.hostname === `db.${expectedRef}.supabase.co`;
+  const isPoolerHost = parsed.hostname.endsWith('.pooler.supabase.com')
+    && username.endsWith(`.${expectedRef}`);
+
+  if (!isDirectHost && !isPoolerHost) {
+    throw new Error(
+      `A conexão deve apontar exclusivamente para o projeto Supabase CRM R2 MARKETING DIGITAL (${expectedRef}).`,
+    );
+  }
+}
+
 function isEnabled(value, fallback = false) {
   if (value == null || value === '') return fallback;
   return value.trim().toLowerCase() === 'true';
@@ -43,6 +65,8 @@ function run(label, command, args) {
 }
 
 const schema = process.env.DATABASE_SCHEMA?.trim() || 'gestao_ads';
+const expectedProjectRef = process.env.SUPABASE_PROJECT_REF?.trim() || DEFAULT_SUPABASE_PROJECT_REF;
+
 if (schema !== 'gestao_ads') {
   console.error('[startup] DATABASE_SCHEMA deve permanecer como gestao_ads.');
   console.error('[startup] O bloqueio evita alterações acidentais no schema public do CRM.');
@@ -58,15 +82,20 @@ if (!database) {
 
 try {
   process.env.DATABASE_SCHEMA = schema;
+  process.env.SUPABASE_PROJECT_REF = expectedProjectRef;
   process.env.DATABASE_URL = withSchema(database.value, schema);
   process.env.DIRECT_URL = withSchema(process.env.DIRECT_URL?.trim() || database.value, schema);
+  assertExpectedSupabaseProject(process.env.DATABASE_URL, expectedProjectRef);
+  assertExpectedSupabaseProject(process.env.DIRECT_URL, expectedProjectRef);
 } catch (error) {
   console.error(`[startup] ${error instanceof Error ? error.message : 'URL de banco inválida.'}`);
   process.exit(1);
 }
 
 const parsed = new URL(process.env.DATABASE_URL);
-console.log(`[startup] Banco: ${parsed.hostname}/${parsed.pathname.replace(/^\//, '') || 'postgres'} | schema=${schema}`);
+console.log(
+  `[startup] Projeto Supabase: ${expectedProjectRef} | banco=${parsed.hostname}/${parsed.pathname.replace(/^\//, '') || 'postgres'} | schema=${schema}`,
+);
 
 if (isEnabled(process.env.PRISMA_DB_PUSH, true)) {
   run('Sincronizando estrutura isolada do Prisma', 'npx', [
