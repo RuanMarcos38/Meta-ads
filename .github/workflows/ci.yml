@@ -28,6 +28,10 @@ jobs:
         working-directory: apps/api
         run: npm install
 
+      - name: Audit API production dependencies
+        working-directory: apps/api
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Generate Prisma client
         working-directory: apps/api
         run: npx prisma generate
@@ -47,6 +51,10 @@ jobs:
       - name: Install Web dependencies
         working-directory: apps/web
         run: npm install
+
+      - name: Audit Web production dependencies
+        working-directory: apps/web
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Typecheck Web
         working-directory: apps/web
