@@ -1,0 +1,49 @@
+name: Live EasyPanel Diagnostic
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve domains
+        run: |
+          set -x
+          getent ahosts gestao.r2rmarketingdigital.com.br || true
+          getent ahosts api-gestao.r2rmarketingdigital.com.br || true
+
+      - name: Inspect frontend
+        run: |
+          set +e
+          curl -vkIL --connect-timeout 15 --max-time 30 https://gestao.r2rmarketingdigital.com.br/login
+          echo "frontend_exit=$?"
+
+      - name: Inspect API root and health
+        run: |
+          set +e
+          for url in \
+            https://api-gestao.r2rmarketingdigital.com.br/ \
+            https://api-gestao.r2rmarketingdigital.com.br/health \
+            https://api-gestao.r2rmarketingdigital.com.br/auth/status; do
+            echo "===== $url ====="
+            curl -vkisS --connect-timeout 15 --max-time 30 "$url"
+            echo
+            echo "curl_exit=$?"
+          done
+
+      - name: Inspect CORS preflight
+        run: |
+          set +e
+          curl -vkisS --connect-timeout 15 --max-time 30 \
+            -X OPTIONS \
+            -H 'Origin: https://gestao.r2rmarketingdigital.com.br' \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type' \
+            https://api-gestao.r2rmarketingdigital.com.br/auth/login
+          echo "cors_exit=$?"
