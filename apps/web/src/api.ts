@@ -1,8 +1,11 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'https://api-gestao.r2rmarketingdigital.com.br';
+export const apiBaseURL = import.meta.env.VITE_API_BASE_URL || 'https://api-gestao.r2rmarketingdigital.com.br';
 
-export const api = axios.create({ baseURL });
+export const api = axios.create({
+  baseURL: apiBaseURL,
+  timeout: 15000,
+});
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
@@ -25,7 +28,7 @@ api.interceptors.response.use(
       if (refresh) {
         try {
           refreshRequest ??= axios
-            .post(`${baseURL}/auth/refresh`, { refresh })
+            .post(`${apiBaseURL}/auth/refresh`, { refresh }, { timeout: 15000 })
             .then((response) => response.data.data.token as string)
             .finally(() => { refreshRequest = null; });
 
@@ -34,7 +37,7 @@ api.interceptors.response.use(
           request.headers.Authorization = `Bearer ${token}`;
           return api(request);
         } catch {
-          // O tratamento abaixo encerra a sessão.
+          // O tratamento abaixo encerra a sessão local.
         }
       }
 
