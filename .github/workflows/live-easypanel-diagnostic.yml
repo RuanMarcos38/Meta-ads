@@ -15,8 +15,14 @@ jobs:
       - name: Resolve domains
         run: |
           set -x
-          getent ahosts gestao.r2rmarketingdigital.com.br || true
-          getent ahosts api-gestao.r2rmarketingdigital.com.br || true
+          for host in \
+            gestao.r2rmarketingdigital.com.br \
+            api-gestao.r2rmarketingdigital.com.br \
+            n8n-n8n.ke4n49.easypanel.host \
+            evolution-evolution-api.ke4n49.easypanel.host; do
+            echo "===== ${host} ====="
+            getent ahosts "$host" || true
+          done
 
       - name: Inspect frontend
         run: |
@@ -33,8 +39,9 @@ jobs:
             https://api-gestao.r2rmarketingdigital.com.br/auth/status; do
             echo "===== $url ====="
             curl -vkisS --connect-timeout 15 --max-time 30 "$url"
+            result=$?
             echo
-            echo "curl_exit=$?"
+            echo "curl_exit=$result"
           done
 
       - name: Inspect CORS preflight
