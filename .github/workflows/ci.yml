@@ -7,6 +7,20 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       NODE_ENV: test
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres?schema=gestao_ads
@@ -16,6 +30,11 @@ jobs:
       JWT_REFRESH_SECRET: ci-refresh-secret-with-more-than-32-characters
       ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
       DEMO_MODE: "true"
+      RUN_INTEGRATION_TESTS: "true"
+      SEED_ADMIN_NAME: Administrador CI
+      SEED_ADMIN_EMAIL: admin@r2rmarketingdigital.com.br
+      SEED_ADMIN_PASSWORD: "CiAdmin#2026!Secure"
+      SEED_DEMO_CLIENT: "false"
 
     steps:
       - uses: actions/checkout@v4
@@ -36,11 +55,17 @@ jobs:
         working-directory: apps/api
         run: npx prisma generate
 
+      - name: Prepare isolated integration database
+        working-directory: apps/api
+        run: |
+          npx prisma db push --skip-generate
+          npm run seed
+
       - name: Typecheck API
         working-directory: apps/api
         run: npm run typecheck
 
-      - name: Test API
+      - name: Test API unit and integration flows
         working-directory: apps/api
         run: npm test
 
@@ -65,3 +90,39 @@ jobs:
         env:
           VITE_API_BASE_URL: https://api-gestao.r2rmarketingdigital.com.br
         run: npm run build
+
+  production-probe:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Probe published frontend and API
+        shell: bash
+        run: |
+          set -u
+          failed=0
+
+          probe() {
+            local label="$1"
+            local url="$2"
+            local expected="$3"
+            local body_file
+            body_file="$(mktemp)"
+            local status
+            status="$(curl -sS --connect-timeout 10 --max-time 20 -o "$body_file" -w '%{http_code}' "$url" || true)"
+            echo "[$label] HTTP ${status} ${url}"
+            head -c 500 "$body_file" || true
+            echo
+            if [[ ! "$status" =~ $expected ]]; then
+              failed=1
+            fi
+          }
+
+          probe "frontend-login" "https://gestao.r2rmarketingdigital.com.br/login" '^2[0-9][0-9]$'
+          probe "api-live" "https://api-gestao.r2rmarketingdigital.com.br/live" '^2[0-9][0-9]$'
+          probe "api-health" "https://api-gestao.r2rmarketingdigital.com.br/health" '^2[0-9][0-9]$'
+          probe "auth-status" "https://api-gestao.r2rmarketingdigital.com.br/auth/status" '^2[0-9][0-9]$'
+
+          if [ "$failed" -ne 0 ]; then
+            echo "Uma ou mais verificações públicas falharam. Consulte os status acima."
+            exit 1
+          fi
