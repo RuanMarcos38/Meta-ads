@@ -12,6 +12,7 @@ const DATABASE_ALIASES = [
 ] as const;
 
 const DEFAULT_SUPABASE_PROJECT_REF = 'iqrnytsgwaiegddfxfjs';
+const DEFAULT_SUPABASE_SESSION_POOLER_HOST = 'aws-0-us-west-2.pooler.supabase.com';
 const DIAGNOSTIC_JWT_SECRET = 'diagnostic-only-jwt-secret-change-this-in-production-2026';
 const DIAGNOSTIC_REFRESH_SECRET = 'diagnostic-only-refresh-secret-change-this-in-production-2026';
 
@@ -45,6 +46,29 @@ function normalizePostgresUrl(value: string): string {
   const username = encodeURIComponent(decodeSafely(rawUsername));
   const password = encodeURIComponent(decodeSafely(rawPassword));
   return `${protocol}${username}:${password}@${hostname}${port}${pathname || '/postgres'}${query}`;
+}
+
+function preferSupabaseSessionPooler(value: string, expectedRef: string): string {
+  if (!value || !/^postgres(ql)?:\/\//i.test(value)) return value;
+
+  try {
+    const parsed = new URL(normalizePostgresUrl(value));
+    const directHost = `db.${expectedRef}.supabase.co`;
+    if (parsed.hostname !== directHost) return value;
+
+    const decodedUsername = decodeSafely(parsed.username || 'postgres');
+    const poolerUsername = decodedUsername.endsWith(`.${expectedRef}`)
+      ? decodedUsername
+      : `${decodedUsername}.${expectedRef}`;
+
+    parsed.hostname = DEFAULT_SUPABASE_SESSION_POOLER_HOST;
+    parsed.port = '5432';
+    parsed.username = poolerUsername;
+    parsed.searchParams.set('sslmode', 'require');
+    return parsed.toString();
+  } catch {
+    return value;
+  }
 }
 
 function databaseUrlWithSchema(
@@ -112,8 +136,10 @@ if (configuredSchema !== 'gestao_ads') {
 
 const rawDatabaseUrl = firstConfigured(DATABASE_ALIASES);
 const rawDirectUrl = process.env.DIRECT_URL?.trim() || rawDatabaseUrl;
-const databaseUrl = databaseUrlWithSchema(rawDatabaseUrl, databaseSchema, configurationErrors, 'DATABASE_URL');
-const directUrl = databaseUrlWithSchema(rawDirectUrl, databaseSchema, configurationErrors, 'DIRECT_URL');
+const preferredDatabaseUrl = preferSupabaseSessionPooler(rawDatabaseUrl, supabaseProjectRef);
+const preferredDirectUrl = preferSupabaseSessionPooler(rawDirectUrl, supabaseProjectRef);
+const databaseUrl = databaseUrlWithSchema(preferredDatabaseUrl, databaseSchema, configurationErrors, 'DATABASE_URL');
+const directUrl = databaseUrlWithSchema(preferredDirectUrl, databaseSchema, configurationErrors, 'DIRECT_URL');
 
 if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
 if (directUrl) process.env.DIRECT_URL = directUrl;
