@@ -1,0 +1,14 @@
+name: Edge User Probe
+on:
+  push:
+  pull_request:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Supabase Edge user visibility
+        run: |
+          set -euo pipefail
+          curl -fsSL --connect-timeout 10 --max-time 20 \
+            https://iqrnytsgwaiegddfxfjs.supabase.co/functions/v1/gestao-ads-user-probe
