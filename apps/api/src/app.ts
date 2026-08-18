@@ -5,6 +5,7 @@ import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env.js';
 import { registerRoutes } from './routes.js';
+import { registerDatabaseDiagnostics } from './databaseDiagnostics.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -14,6 +15,7 @@ export async function buildApp() {
   await app.register(jwt, { secret: env.jwtSecret });
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
+  await registerDatabaseDiagnostics(app);
   await registerRoutes(app);
   return app;
 }
