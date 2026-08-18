@@ -119,6 +119,7 @@ jobs:
 
           probe "frontend-login" "https://gestao.r2rmarketingdigital.com.br/login" '^2[0-9][0-9]$'
           probe "api-live" "https://api-gestao.r2rmarketingdigital.com.br/live" '^2[0-9][0-9]$'
+          probe "database-diagnostics" "https://api-gestao.r2rmarketingdigital.com.br/diagnostics/database" '^2[0-9][0-9]$'
           probe "api-health" "https://api-gestao.r2rmarketingdigital.com.br/health" '^2[0-9][0-9]$'
           probe "auth-status" "https://api-gestao.r2rmarketingdigital.com.br/auth/status" '^2[0-9][0-9]$'
 
