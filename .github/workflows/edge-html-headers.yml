@@ -1,0 +1,21 @@
+name: Edge HTML Headers
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect response headers
+        run: |
+          set -euo pipefail
+          curl -sS --connect-timeout 10 --max-time 20 \
+            -D /tmp/headers.txt \
+            -o /tmp/body.html \
+            https://iqrnytsgwaiegddfxfjs.supabase.co/functions/v1/gestao-ads-test-api/
+          echo '--- HEADERS ---'
+          cat /tmp/headers.txt
+          echo '--- BODY PREFIX ---'
+          head -c 200 /tmp/body.html
+          echo
