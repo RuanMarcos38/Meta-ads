@@ -95,11 +95,12 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - name: Probe published frontend and API
+      - name: Probe Supabase Edge test API
         shell: bash
         run: |
           set -u
           failed=0
+          BASE="https://iqrnytsgwaiegddfxfjs.supabase.co/functions/v1/gestao-ads-test-api"
 
           probe() {
             local label="$1"
@@ -110,20 +111,19 @@ jobs:
             local status
             status="$(curl -sS --connect-timeout 10 --max-time 20 -o "$body_file" -w '%{http_code}' "$url" || true)"
             echo "[$label] HTTP ${status} ${url}"
-            head -c 500 "$body_file" || true
+            head -c 1000 "$body_file" || true
             echo
             if [[ ! "$status" =~ $expected ]]; then
               failed=1
             fi
           }
 
-          probe "frontend-login" "https://gestao.r2rmarketingdigital.com.br/login" '^2[0-9][0-9]$'
-          probe "api-live" "https://api-gestao.r2rmarketingdigital.com.br/live" '^2[0-9][0-9]$'
-          probe "database-diagnostics" "https://api-gestao.r2rmarketingdigital.com.br/diagnostics/database" '^2[0-9][0-9]$'
-          probe "api-health" "https://api-gestao.r2rmarketingdigital.com.br/health" '^2[0-9][0-9]$'
-          probe "auth-status" "https://api-gestao.r2rmarketingdigital.com.br/auth/status" '^2[0-9][0-9]$'
+          probe "edge-test-ui" "${BASE}/" '^2[0-9][0-9]$'
+          probe "edge-live" "${BASE}/live" '^2[0-9][0-9]$'
+          probe "edge-health" "${BASE}/health" '^2[0-9][0-9]$'
+          probe "edge-auth-status" "${BASE}/auth/status" '^2[0-9][0-9]$'
 
           if [ "$failed" -ne 0 ]; then
-            echo "Uma ou mais verificações públicas falharam. Consulte os status acima."
+            echo "Uma ou mais verificações da API Edge falharam."
             exit 1
           fi
