@@ -10,5 +10,6 @@ jobs:
       - name: Check Supabase Edge user visibility
         run: |
           set -euo pipefail
-          curl -fsSL --connect-timeout 10 --max-time 20 \
+          curl -sS --connect-timeout 10 --max-time 20 \
+            -w '\nHTTP %{http_code}\n' \
             https://iqrnytsgwaiegddfxfjs.supabase.co/functions/v1/gestao-ads-user-probe
