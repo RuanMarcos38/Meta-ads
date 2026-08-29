@@ -190,6 +190,6 @@ export const env = {
     appId: process.env.META_APP_ID?.trim() || '',
     appSecret: process.env.META_APP_SECRET?.trim() || '',
     redirectUri: process.env.META_REDIRECT_URI?.trim() || '',
-    apiVersion: process.env.META_API_VERSION?.trim() || 'v21.0',
+    apiVersion: process.env.META_API_VERSION?.trim() || 'v25.0',
   },
 };
