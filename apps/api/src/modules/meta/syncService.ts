@@ -4,10 +4,17 @@ import { MetaAdsService } from './MetaAdsService.js';
 import { mapMetaActions } from './metaActions.js';
 import dayjs from 'dayjs';
 
+export type SyncJobType = 'manual' | 'automatic' | 'oauth';
+
 // Dispara sincronização real das contas Meta de um cliente.
-export async function runSync(organizationId: string, clientId: string | undefined, userId?: string) {
+export async function runSync(
+  organizationId: string,
+  clientId: string | undefined,
+  userId?: string,
+  jobType: SyncJobType = 'manual',
+) {
   const job = await prisma.syncJob.create({
-    data: { organizationId, clientId, type: 'manual', status: 'running', createdBy: userId },
+    data: { organizationId, clientId, type: jobType, status: 'running', createdBy: userId },
   });
 
   try {
@@ -23,6 +30,9 @@ export async function runSync(organizationId: string, clientId: string | undefin
     for (const acc of accounts) {
       if (acc.connection.organizationId !== organizationId) {
         throw new Error('Conexão Meta não pertence à organização autenticada.');
+      }
+      if (acc.connection.status !== 'active') {
+        continue;
       }
       if (clientId && acc.clientId !== clientId) {
         throw new Error('Conta de anúncio não pertence ao cliente autenticado.');
