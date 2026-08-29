@@ -4,16 +4,16 @@ export default {
     extend: {
       colors: {
         brand: {
-          bg: '#f4f6f2',
+          bg: '#f5f7f5',
           card: '#ffffff',
-          border: '#e1e8dd',
-          blue: '#0b6b45',
-          purple: '#123d2d',
-          neon: '#62b783',
+          border: '#dce3dd',
+          blue: '#1f6b4f',
+          purple: '#163f31',
+          neon: '#5c9b7c',
         },
       },
       boxShadow: {
-        soft: '0 18px 45px rgba(22, 44, 32, 0.08)',
+        soft: '0 12px 34px rgba(20, 48, 34, 0.08)',
       },
     },
   },
