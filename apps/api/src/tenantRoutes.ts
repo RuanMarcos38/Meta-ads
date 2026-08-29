@@ -19,7 +19,7 @@ type ScopeInput = z.infer<typeof scopeSchema>;
 
 type ResolvedScope = {
   clientId: string;
-  accountIds?: string[];
+  accountIds: string[];
 };
 
 async function resolveScope(
@@ -49,12 +49,11 @@ async function resolveScope(
     return null;
   }
 
-  if (!input.businessId && !input.adAccountId) return { clientId };
-
   const accounts = await prisma.metaAdAccount.findMany({
     where: {
       organizationId: user.organizationId!,
       clientId,
+      isAssigned: true,
       ...(input.businessId ? { businessId: input.businessId } : {}),
       ...(input.adAccountId ? { id: input.adAccountId } : {}),
     },
@@ -62,7 +61,7 @@ async function resolveScope(
   });
 
   if (input.adAccountId && accounts.length === 0) {
-    reply.code(404).send(fail('META_ACCOUNT_NOT_FOUND', 'Conta Meta não encontrada para esta empresa.'));
+    reply.code(404).send(fail('META_ACCOUNT_NOT_ASSIGNED', 'Esta conta Meta não está autorizada para a empresa selecionada.'));
     return null;
   }
 
@@ -74,7 +73,7 @@ function insightWhere(user: AuthUser, scope: ResolvedScope) {
     organizationId: user.organizationId!,
     clientId: scope.clientId,
     level: 'campaign' as const,
-    ...(scope.accountIds ? { adAccountId: { in: scope.accountIds } } : {}),
+    adAccountId: { in: scope.accountIds },
   };
 }
 
@@ -84,8 +83,9 @@ export async function registerTenantRoutes(app: FastifyInstance) {
     const requested = scopeSchema.pick({ clientId: true }).safeParse(req.query);
     if (!requested.success) return reply.code(400).send(fail('VALIDATION', 'Filtro de empresa inválido.'));
 
-    const forcedClientId = restrictedRoles.has(user.role) ? user.clientId : requested.data.clientId;
-    if (restrictedRoles.has(user.role) && !forcedClientId) {
+    const tenantLocked = restrictedRoles.has(user.role);
+    const forcedClientId = tenantLocked ? user.clientId : requested.data.clientId;
+    if (tenantLocked && !forcedClientId) {
       return reply.code(403).send(fail('CLIENT_SCOPE_REQUIRED', 'Este usuário ainda não está vinculado a uma empresa.'));
     }
 
@@ -104,6 +104,7 @@ export async function registerTenantRoutes(app: FastifyInstance) {
           where: {
             organizationId: user.organizationId!,
             clientId: { in: clientIds },
+            ...(tenantLocked ? { isAssigned: true } : {}),
           },
           select: {
             id: true,
@@ -116,6 +117,7 @@ export async function registerTenantRoutes(app: FastifyInstance) {
             businessId: true,
             businessName: true,
             isActive: true,
+            isAssigned: true,
           },
           orderBy: [{ businessName: 'asc' }, { name: 'asc' }],
         })
@@ -140,7 +142,7 @@ export async function registerTenantRoutes(app: FastifyInstance) {
       businesses: Array.from(businessesByKey.values()),
       accounts,
       role: user.role,
-      tenantLocked: restrictedRoles.has(user.role),
+      tenantLocked,
     });
   });
 
@@ -184,7 +186,7 @@ export async function registerTenantRoutes(app: FastifyInstance) {
       where: {
         organizationId: user.organizationId!,
         clientId: scope.clientId,
-        ...(scope.accountIds ? { adAccountId: { in: scope.accountIds } } : {}),
+        adAccountId: { in: scope.accountIds },
       },
       include: {
         adAccount: {
@@ -281,12 +283,63 @@ export async function registerTenantRoutes(app: FastifyInstance) {
     });
     if (!client) return reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Empresa não encontrada para sincronização.'));
 
+    const assignedAccounts = await prisma.metaAdAccount.count({
+      where: { organizationId: user.organizationId!, clientId, isActive: true, isAssigned: true },
+    });
+    if (!assignedAccounts) {
+      return reply.code(409).send(fail('NO_ASSIGNED_META_ACCOUNTS', 'Selecione ao menos uma conta Meta para esta empresa antes de sincronizar.'));
+    }
+
     try {
       const result = await runSync(user.organizationId!, clientId, user.id);
       return ok(result, 'Sincronização da empresa concluída com sucesso.');
     } catch {
       return reply.code(502).send(fail('META_SYNC_ERROR', 'Falha ao sincronizar esta empresa com a Meta.'));
     }
+  });
+
+  app.patch('/meta/client-accounts/:id/assignment', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
+    const user = req.user as AuthUser;
+    const params = z.object({ id: z.string().uuid() }).safeParse(req.params);
+    const body = z.object({ isAssigned: z.boolean() }).safeParse(req.body);
+    if (!params.success || !body.success) return reply.code(400).send(fail('VALIDATION', 'Vinculação de conta inválida.'));
+
+    const account = await prisma.metaAdAccount.findFirst({
+      where: { id: params.data.id, organizationId: user.organizationId! },
+      select: { id: true, clientId: true, isActive: true, name: true, accountId: true },
+    });
+    if (!account) return reply.code(404).send(fail('META_ACCOUNT_NOT_FOUND', 'Conta Meta não encontrada.'));
+    if (body.data.isAssigned && !account.isActive) {
+      return reply.code(409).send(fail('META_ACCOUNT_DISCONNECTED', 'Reconecte a Meta antes de vincular esta conta.'));
+    }
+
+    const updated = await prisma.metaAdAccount.update({
+      where: { id: account.id },
+      data: { isAssigned: body.data.isAssigned },
+      select: {
+        id: true,
+        clientId: true,
+        accountId: true,
+        name: true,
+        businessId: true,
+        businessName: true,
+        isActive: true,
+        isAssigned: true,
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        organizationId: user.organizationId,
+        userId: user.id,
+        action: body.data.isAssigned ? 'ASSIGN_META_ACCOUNT_TO_CLIENT' : 'UNASSIGN_META_ACCOUNT_FROM_CLIENT',
+        entity: 'MetaAdAccount',
+        entityId: updated.id,
+        metadataJson: { clientId: updated.clientId, accountId: updated.accountId },
+      },
+    });
+
+    return ok(updated, body.data.isAssigned ? 'Conta Meta vinculada à empresa.' : 'Conta Meta removida do escopo da empresa.');
   });
 
   app.post('/meta/client-disconnect', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
@@ -307,7 +360,7 @@ export async function registerTenantRoutes(app: FastifyInstance) {
       });
       const accounts = await tx.metaAdAccount.updateMany({
         where: { organizationId: user.organizationId!, clientId: client.id, isActive: true },
-        data: { isActive: false },
+        data: { isActive: false, isAssigned: false },
       });
       await tx.auditLog.create({
         data: {
