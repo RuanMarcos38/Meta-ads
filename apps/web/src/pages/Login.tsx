@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, Building2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, apiBaseURL } from '../api';
 import { useAuth } from '../store';
 
-const BUILD_ID = '2026.08.29.1';
+const BUILD_ID = '2026.08.29.2';
 
 type ApiErrorPayload = {
   error?: {
@@ -19,6 +19,7 @@ type ApiState = 'checking' | 'online' | 'database-error' | 'offline';
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [businessId, setBusinessId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [apiState, setApiState] = useState<ApiState>('checking');
@@ -58,9 +59,10 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const { data } = await api.post('/auth/login', {
+      const { data } = await api.post('/auth/login-bm', {
         email: email.trim().toLowerCase(),
         password,
+        ...(businessId.trim() ? { businessId: businessId.trim() } : {}),
       });
 
       const token = data?.data?.token;
@@ -81,13 +83,22 @@ export default function Login() {
       const status = caughtError.response?.status;
       const payload = caughtError.response?.data as ApiErrorPayload | undefined;
       const apiMessage = payload?.error?.message;
+      const apiCode = payload?.error?.code;
 
       if (!caughtError.response) {
         setError('Não foi possível conectar à API. O backend está offline ou o domínio da API está incorreto.');
+      } else if (apiCode === 'BM_REQUIRED') {
+        setError('Informe o ID da Business Manager vinculada ao seu acesso.');
+      } else if (apiCode === 'BM_NOT_LINKED') {
+        setError('Seu usuário ainda não possui uma BM vinculada. Solicite a configuração ao administrador.');
+      } else if (apiCode === 'INVALID_BM') {
+        setError('A BM informada não pertence a este usuário.');
+      } else if (apiCode === 'BM_WITHOUT_ACCOUNTS') {
+        setError('Sua BM ainda não possui contas Meta autorizadas no sistema.');
       } else if (status === 401) {
         setError(adminReady === false
           ? 'Nenhum administrador ativo foi encontrado no banco. O acesso inicial precisa ser criado no backend.'
-          : 'E-mail ou senha inválidos.');
+          : 'E-mail, senha ou BM inválidos.');
       } else if (status === 429) {
         setError('Muitas tentativas de acesso. Aguarde um minuto e tente novamente.');
       } else if (status === 503 || payload?.error?.code === 'DATABASE_UNAVAILABLE') {
@@ -158,12 +169,30 @@ export default function Login() {
             className="mb-4 mt-1.5 h-11 w-full rounded-[9px] border border-brand-border bg-white px-3.5 text-sm text-slate-800 outline-none transition-colors focus:border-[#91b19f]"
           />
 
+          <label className="text-xs font-semibold text-slate-600" htmlFor="businessId">Business Manager (ID)</label>
+          <div className="relative mt-1.5">
+            <Building2 className="pointer-events-none absolute left-3 top-3 text-slate-400" size={16} />
+            <input
+              id="businessId"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              value={businessId}
+              onChange={(event) => setBusinessId(event.target.value)}
+              placeholder="Ex.: 123456789012345"
+              className="h-11 w-full rounded-[9px] border border-brand-border bg-white pl-9 pr-3.5 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-[#91b19f]"
+            />
+          </div>
+          <p className="mb-4 mt-1.5 text-[11px] leading-4 text-slate-400">
+            Obrigatória para Cliente e Gestor. Administradores podem deixar este campo em branco.
+          </p>
+
           {error && <p className="mb-3 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p>}
           <button
             disabled={loading || apiState === 'offline' || apiState === 'database-error'}
             className="h-11 w-full rounded-[9px] bg-brand-blue text-sm font-bold text-white shadow-sm transition-colors hover:bg-brand-purple disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? 'Entrando...' : 'Entrar'}
+            {loading ? 'Validando acesso...' : 'Entrar'}
           </button>
           <p className="mt-5 break-all text-center text-[10px] text-slate-400">
             v{BUILD_ID} · {apiBaseURL}
