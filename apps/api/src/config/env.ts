@@ -15,6 +15,8 @@ const DEFAULT_SUPABASE_PROJECT_REF = 'iqrnytsgwaiegddfxfjs';
 const DEFAULT_SUPABASE_SESSION_POOLER_HOST = 'aws-0-us-west-2.pooler.supabase.com';
 const DIAGNOSTIC_JWT_SECRET = 'diagnostic-only-jwt-secret-change-this-in-production-2026';
 const DIAGNOSTIC_REFRESH_SECRET = 'diagnostic-only-refresh-secret-change-this-in-production-2026';
+const MIN_META_API_MAJOR = 25;
+const DEFAULT_META_API_VERSION = 'v25.0';
 
 function firstConfigured(keys: readonly string[]): string {
   for (const key of keys) {
@@ -36,7 +38,6 @@ function normalizePostgresUrl(value: string): string {
   const trimmed = value.trim();
   if (!/^postgres(ql)?:\/\//i.test(trimmed)) return trimmed;
 
-  // Aceita senha colada sem URL encoding, inclusive com @, #, ?, / e %.
   const match = trimmed.match(
     /^(postgres(?:ql)?:\/\/)([^:/?#]+):(.+)@([^/?#:]+)(:\d+)?(\/[^?]*)?(\?.*)?$/i,
   );
@@ -124,6 +125,16 @@ function validateExpectedSupabaseProject(
   }
 }
 
+function normalizeMetaApiVersion(value?: string): string {
+  const configured = value?.trim() || DEFAULT_META_API_VERSION;
+  const match = configured.match(/^v?(\d+)(?:\.\d+)?$/i);
+  if (!match) return DEFAULT_META_API_VERSION;
+
+  const major = Number(match[1]);
+  if (!Number.isFinite(major) || major < MIN_META_API_MAJOR) return DEFAULT_META_API_VERSION;
+  return `v${major}.0`;
+}
+
 const configurationErrors: string[] = [];
 const nodeEnv = process.env.NODE_ENV?.trim() || 'development';
 const configuredSchema = process.env.DATABASE_SCHEMA?.trim() || 'gestao_ads';
@@ -190,6 +201,6 @@ export const env = {
     appId: process.env.META_APP_ID?.trim() || '',
     appSecret: process.env.META_APP_SECRET?.trim() || '',
     redirectUri: process.env.META_REDIRECT_URI?.trim() || '',
-    apiVersion: process.env.META_API_VERSION?.trim() || 'v25.0',
+    apiVersion: normalizeMetaApiVersion(process.env.META_API_VERSION),
   },
 };
