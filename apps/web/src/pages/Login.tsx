@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, apiBaseURL } from '../api';
 import { useAuth } from '../store';
 
-const BUILD_ID = '2026.08.29.2';
+const BUILD_ID = '2026.08.29.3';
 
 type ApiErrorPayload = {
   error?: {
