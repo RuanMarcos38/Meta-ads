@@ -35,6 +35,7 @@ type AccountOption = {
   businessId?: string | null;
   businessName?: string | null;
   isActive: boolean;
+  isAssigned: boolean;
 };
 type DashboardContext = {
   selectedClientId?: string | null;
@@ -66,6 +67,7 @@ type CampaignRow = {
   status?: string | null;
   spend: number;
   impressions: number;
+  reach: number;
   leads: number;
   conversations: number;
   cpc: number;
@@ -102,7 +104,7 @@ function MetricCard({ label, value, helper, icon: Icon }: {
   icon: typeof WalletCards;
 }) {
   return (
-    <article className="rounded-[12px] border border-[#dde4df] bg-white p-4.5 shadow-[0_1px_2px_rgba(16,24,20,0.04)]">
+    <article className="rounded-[12px] border border-[#dde4df] bg-white p-4 shadow-[0_1px_2px_rgba(16,24,20,0.04)]">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.09em] text-slate-400">{label}</p>
@@ -195,14 +197,23 @@ export default function DashboardScoped() {
   }, [context, clientId, businessId, adAccountId]);
 
   const clients = context?.clients ?? [];
-  const businesses = useMemo(
-    () => (context?.businesses ?? []).filter((item) => item.clientId === clientId),
+  const assignedAccounts = useMemo(
+    () => (context?.accounts ?? []).filter((item) => item.clientId === clientId && item.isAssigned),
     [context, clientId],
   );
+  const businesses = useMemo(() => {
+    const assignedBusinessIds = new Set(assignedAccounts.map((item) => item.businessId).filter(Boolean));
+    return (context?.businesses ?? []).filter((item) => item.clientId === clientId && assignedBusinessIds.has(item.id));
+  }, [context, clientId, assignedAccounts]);
   const accounts = useMemo(
-    () => (context?.accounts ?? []).filter((item) => item.clientId === clientId && (!businessId || item.businessId === businessId)),
-    [context, clientId, businessId],
+    () => assignedAccounts.filter((item) => !businessId || item.businessId === businessId),
+    [assignedAccounts, businessId],
   );
+
+  useEffect(() => {
+    if (adAccountId && !accounts.some((account) => account.id === adAccountId)) setAdAccountId('');
+    if (businessId && !businesses.some((business) => business.id === businessId)) setBusinessId('');
+  }, [accounts, businesses, adAccountId, businessId]);
 
   const selectedClient = clients.find((client) => client.id === clientId);
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === 'ACTIVE').length;
@@ -257,7 +268,7 @@ export default function DashboardScoped() {
             <button
               type="button"
               onClick={() => { void sync(); }}
-              disabled={!clientId || syncing}
+              disabled={!clientId || syncing || assignedAccounts.length === 0}
               className="inline-flex h-11 items-center gap-2 rounded-[9px] bg-[#176846] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#12563a] disabled:cursor-not-allowed disabled:opacity-55"
             >
               <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
@@ -278,12 +289,7 @@ export default function DashboardScoped() {
         <div className="grid gap-3 md:grid-cols-3">
           <label className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-500">
             Empresa
-            <select
-              value={clientId}
-              onChange={(event) => changeClient(event.target.value)}
-              disabled={Boolean(context?.tenantLocked)}
-              className="mt-1.5 h-10 w-full rounded-[8px] border border-[#d9e0db] bg-white px-3 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-[#8db49f] disabled:bg-[#f2f4f2]"
-            >
+            <select value={clientId} onChange={(event) => changeClient(event.target.value)} disabled={Boolean(context?.tenantLocked)} className="mt-1.5 h-10 w-full rounded-[8px] border border-[#d9e0db] bg-white px-3 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-[#8db49f] disabled:bg-[#f2f4f2]">
               {!clients.length && <option value="">Nenhuma empresa disponível</option>}
               {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
             </select>
@@ -291,38 +297,28 @@ export default function DashboardScoped() {
 
           <label className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-500">
             Business Manager
-            <select
-              value={businessId}
-              onChange={(event) => changeBusiness(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-[8px] border border-[#d9e0db] bg-white px-3 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-[#8db49f]"
-            >
-              <option value="">Todas as BMs</option>
+            <select value={businessId} onChange={(event) => changeBusiness(event.target.value)} className="mt-1.5 h-10 w-full rounded-[8px] border border-[#d9e0db] bg-white px-3 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-[#8db49f]">
+              <option value="">Todas as BMs vinculadas</option>
               {businesses.map((business) => <option key={business.id} value={business.id}>{business.name}</option>)}
             </select>
           </label>
 
           <label className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-500">
             Conta Meta Ads
-            <select
-              value={adAccountId}
-              onChange={(event) => setAdAccountId(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-[8px] border border-[#d9e0db] bg-white px-3 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-[#8db49f]"
-            >
-              <option value="">Todas as contas</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name || account.accountId}{account.isActive ? '' : ' · desconectada'}
-                </option>
-              ))}
+            <select value={adAccountId} onChange={(event) => setAdAccountId(event.target.value)} className="mt-1.5 h-10 w-full rounded-[8px] border border-[#d9e0db] bg-white px-3 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-[#8db49f]">
+              <option value="">Todas as contas vinculadas</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}</option>)}
             </select>
           </label>
         </div>
-        {selectedClient && <p className="mt-3 text-[11px] text-slate-400">Visualizando: <span className="font-semibold text-slate-600">{selectedClient.name}</span></p>}
+        {selectedClient && <p className="mt-3 text-[11px] text-slate-400">Visualizando: <span className="font-semibold text-slate-600">{selectedClient.name}</span> · {assignedAccounts.length} conta{assignedAccounts.length === 1 ? '' : 's'} vinculada{assignedAccounts.length === 1 ? '' : 's'}</p>}
       </section>
 
-      {error && (
-        <p className="rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800" role="alert">{error}</p>
+      {!loading && clientId && assignedAccounts.length === 0 && !error && (
+        <p className="rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">Nenhuma conta Meta foi vinculada a esta empresa. Um administrador deve selecionar as contas corretas na página Clientes.</p>
       )}
+
+      {error && <p className="rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800" role="alert">{error}</p>}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard icon={WalletCards} label="Investimento" value={loading ? '—' : money(summary.spend)} helper="Investimento sincronizado no escopo atual." />
@@ -336,11 +332,8 @@ export default function DashboardScoped() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <div className="rounded-[12px] border border-[#dfe5e1] bg-white p-4.5">
-          <div className="mb-4">
-            <h2 className="text-[15px] font-semibold text-[#17251c]">Evolução do investimento</h2>
-            <p className="mt-0.5 text-[11px] text-slate-400">Série diária dos últimos dados sincronizados.</p>
-          </div>
+        <div className="rounded-[12px] border border-[#dfe5e1] bg-white p-4">
+          <div className="mb-4"><h2 className="text-[15px] font-semibold text-[#17251c]">Evolução do investimento</h2><p className="mt-0.5 text-[11px] text-slate-400">Série diária dos últimos dados sincronizados.</p></div>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={daily} margin={{ top: 8, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ee" vertical={false} />
@@ -352,11 +345,8 @@ export default function DashboardScoped() {
           </ResponsiveContainer>
         </div>
 
-        <div className="rounded-[12px] border border-[#dfe5e1] bg-white p-4.5">
-          <div className="mb-4">
-            <h2 className="text-[15px] font-semibold text-[#17251c]">Resultados diários</h2>
-            <p className="mt-0.5 text-[11px] text-slate-400">Leads e conversas no mesmo escopo selecionado.</p>
-          </div>
+        <div className="rounded-[12px] border border-[#dfe5e1] bg-white p-4">
+          <div className="mb-4"><h2 className="text-[15px] font-semibold text-[#17251c]">Resultados diários</h2><p className="mt-0.5 text-[11px] text-slate-400">Leads e conversas no mesmo escopo selecionado.</p></div>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={daily} margin={{ top: 8, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid stroke="#edf0ee" vertical={false} />
@@ -371,30 +361,15 @@ export default function DashboardScoped() {
       </section>
 
       <section className="overflow-hidden rounded-[12px] border border-[#dfe5e1] bg-white">
-        <div className="border-b border-[#e8ece9] px-4 py-3.5">
-          <h2 className="text-[15px] font-semibold text-[#17251c]">Campanhas com maior investimento</h2>
-          <p className="mt-0.5 text-[11px] text-slate-400">Resultados já filtrados por empresa, BM e conta.</p>
-        </div>
+        <div className="border-b border-[#e8ece9] px-4 py-3.5"><h2 className="text-[15px] font-semibold text-[#17251c]">Campanhas com maior investimento</h2><p className="mt-0.5 text-[11px] text-slate-400">Resultados já filtrados por empresa, BM e conta.</p></div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[920px] text-sm">
-            <thead className="bg-[#fafbfa] text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-              <tr>
-                <th className="px-4 py-3">Campanha</th>
-                <th className="px-3 py-3">BM / Conta</th>
-                <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Investimento</th>
-                <th className="px-3 py-3">Leads</th>
-                <th className="px-3 py-3">Conversas</th>
-                <th className="px-4 py-3">CPC</th>
-              </tr>
-            </thead>
+            <thead className="bg-[#fafbfa] text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400"><tr><th className="px-4 py-3">Campanha</th><th className="px-3 py-3">BM / Conta</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Investimento</th><th className="px-3 py-3">Leads</th><th className="px-3 py-3">Conversas</th><th className="px-4 py-3">CPC</th></tr></thead>
             <tbody>
               {topCampaigns.map((campaign) => (
                 <tr key={campaign.id} className="border-t border-[#eef1ef] text-[13px]">
                   <td className="px-4 py-3.5 font-semibold text-[#1a2820]">{campaign.name}</td>
-                  <td className="px-3 py-3.5 text-slate-500">
-                    {campaign.adAccount?.businessName || 'BM não identificado'} · {campaign.adAccount?.name || campaign.adAccount?.accountId || '-'}
-                  </td>
+                  <td className="px-3 py-3.5 text-slate-500">{campaign.adAccount?.businessName || 'BM não identificada'} · {campaign.adAccount?.name || campaign.adAccount?.accountId || '-'}</td>
                   <td className="px-3 py-3.5 text-slate-500">{campaign.status || '-'}</td>
                   <td className="px-3 py-3.5 tabular-nums text-slate-700">{money(campaign.spend)}</td>
                   <td className="px-3 py-3.5 tabular-nums text-slate-700">{integer(campaign.leads)}</td>
