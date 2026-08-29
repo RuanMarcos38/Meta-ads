@@ -14,6 +14,7 @@ type AccountOption = {
   businessId?: string | null;
   businessName?: string | null;
   isActive: boolean;
+  isAssigned: boolean;
 };
 type Context = {
   selectedClientId?: string | null;
@@ -121,20 +122,29 @@ export default function CampaignsScoped() {
     void loadCampaigns();
   }, [context, clientId, businessId, filterAccountId]);
 
-  const businesses = useMemo(
-    () => (context?.businesses ?? []).filter((item) => item.clientId === clientId),
+  const assignedAccounts = useMemo(
+    () => (context?.accounts ?? []).filter((item) => item.clientId === clientId && item.isActive && item.isAssigned),
     [context, clientId],
   );
+
+  const businesses = useMemo(() => {
+    const assignedBusinessIds = new Set(assignedAccounts.map((item) => item.businessId).filter(Boolean));
+    return (context?.businesses ?? []).filter((item) => item.clientId === clientId && assignedBusinessIds.has(item.id));
+  }, [context, clientId, assignedAccounts]);
+
   const accounts = useMemo(
-    () => (context?.accounts ?? []).filter((item) => item.clientId === clientId && item.isActive && (!businessId || item.businessId === businessId)),
-    [context, clientId, businessId],
+    () => assignedAccounts.filter((item) => !businessId || item.businessId === businessId),
+    [assignedAccounts, businessId],
   );
 
   useEffect(() => {
     if (!accounts.some((account) => account.id === createAccountId)) {
       setCreateAccountId(accounts[0]?.id || '');
     }
-  }, [accounts, createAccountId]);
+    if (filterAccountId && !accounts.some((account) => account.id === filterAccountId)) {
+      setFilterAccountId('');
+    }
+  }, [accounts, createAccountId, filterAccountId]);
 
   function changeClient(value: string) {
     setClientId(value);
@@ -223,7 +233,7 @@ export default function CampaignsScoped() {
           </label>
           <label className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-500">Conta Meta Ads
             <select value={filterAccountId} onChange={(event) => setFilterAccountId(event.target.value)} className="mt-1.5 h-10 w-full rounded-[8px] border border-[#d9e0db] bg-white px-3 text-sm font-medium normal-case tracking-normal outline-none">
-              <option value="">Todas as contas</option>
+              <option value="">Todas as contas vinculadas</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}</option>)}
             </select>
           </label>
@@ -237,7 +247,7 @@ export default function CampaignsScoped() {
             <p className="mt-1 text-[11px] text-slate-500">A campanha é criada pausada para revisão antes da ativação.</p>
           </div>
           {!accounts.length ? (
-            <p className="rounded-[8px] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Nenhuma conta ativa está disponível para esta empresa/BM.</p>
+            <p className="rounded-[8px] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Nenhuma conta vinculada está disponível para esta empresa/BM. Vincule a conta na página Clientes.</p>
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <label className="text-xs font-semibold text-slate-600">Conta de anúncio
@@ -282,7 +292,7 @@ export default function CampaignsScoped() {
               {rows.map((campaign) => (
                 <tr key={campaign.id} className="border-t border-[#eef1ef] text-[13px]">
                   <td className="px-4 py-3.5 font-semibold text-[#1a2820]">{campaign.name}</td>
-                  <td className="px-3 py-3.5 text-slate-500">{campaign.adAccount?.businessName || 'BM não identificado'} · {campaign.adAccount?.name || campaign.adAccount?.accountId || '-'}</td>
+                  <td className="px-3 py-3.5 text-slate-500">{campaign.adAccount?.businessName || 'BM não identificada'} · {campaign.adAccount?.name || campaign.adAccount?.accountId || '-'}</td>
                   <td className="px-3 py-3.5 text-slate-500">{campaign.objective || '-'}</td>
                   <td className="px-3 py-3.5"><span className={`inline-flex rounded-[6px] px-2 py-1 text-[11px] font-semibold ${campaign.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{campaign.status || '-'}</span></td>
                   <td className="px-3 py-3.5 tabular-nums">{money(campaign.spend)}</td>
