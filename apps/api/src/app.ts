@@ -5,6 +5,7 @@ import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env.js';
 import { registerRoutes } from './routes.js';
+import { registerOperationalRoutes } from './operationalRoutes.js';
 import { registerDatabaseDiagnostics } from './databaseDiagnostics.js';
 
 export async function buildApp() {
@@ -17,5 +18,6 @@ export async function buildApp() {
 
   await registerDatabaseDiagnostics(app);
   await registerRoutes(app);
+  await registerOperationalRoutes(app);
   return app;
 }
