@@ -8,7 +8,7 @@ export interface AuthUser {
   clientId?: string;
 }
 
-const NO_CLIENT_SCOPE = '__no_assigned_client__';
+const NO_CLIENT_SCOPE = '00000000-0000-0000-0000-000000000000';
 
 export function requireAuth(roles?: string[]) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
@@ -25,7 +25,7 @@ export function requireAuth(roles?: string[]) {
 }
 
 // CLIENT e MANAGER ficam presos ao clientId gravado no token.
-// Se não houver clientId, usamos um escopo impossível em vez de cair no consolidado da organização.
+// Se não houver clientId, usamos um UUID impossível em vez de cair no consolidado da organização.
 // Somente administradores podem selecionar outro cliente da mesma organização.
 export function scopeClient(user: AuthUser, requestedClientId?: string): string | undefined {
   if (user.role === 'CLIENT' || user.role === 'MANAGER') return user.clientId || NO_CLIENT_SCOPE;
