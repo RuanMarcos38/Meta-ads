@@ -20,7 +20,7 @@ async function getPaged(url: string, params: Record<string, string>) {
     const res: any = await withRetry(() => axios.get(next!, { params: p }));
     results.push(...(res.data.data ?? []));
     next = res.data.paging?.next;
-    p = undefined; // next já contém query string
+    p = undefined;
   }
   return results;
 }
@@ -46,6 +46,11 @@ export type MetaCampaignObjective =
 
 export type MetaSpecialAdCategory = 'HOUSING' | 'EMPLOYMENT' | 'CREDIT' | 'ISSUES_ELECTIONS_POLITICS';
 
+export type MetaBusinessRef = {
+  businessId: string;
+  businessName: string;
+};
+
 export class MetaAdsService {
   constructor(private accessToken: string) {}
 
@@ -54,6 +59,46 @@ export class MetaAdsService {
       access_token: this.accessToken,
       fields: 'account_id,name,currency,timezone_name,account_status',
     });
+  }
+
+  async businessAdAccountMap(): Promise<Map<string, MetaBusinessRef>> {
+    const result = new Map<string, MetaBusinessRef>();
+    let businesses: any[] = [];
+
+    try {
+      businesses = await getPaged(`${BASE()}/me/businesses`, {
+        access_token: this.accessToken,
+        fields: 'id,name',
+        limit: '100',
+      });
+    } catch {
+      return result;
+    }
+
+    for (const business of businesses) {
+      if (!business?.id) continue;
+      for (const edge of ['owned_ad_accounts', 'client_ad_accounts']) {
+        try {
+          const accounts = await getPaged(`${BASE()}/${business.id}/${edge}`, {
+            access_token: this.accessToken,
+            fields: 'account_id,name',
+            limit: '200',
+          });
+          for (const account of accounts) {
+            const accountId = String(account?.account_id || '').replace(/^act_/, '');
+            if (!accountId || result.has(accountId)) continue;
+            result.set(accountId, {
+              businessId: String(business.id),
+              businessName: String(business.name || `BM ${business.id}`),
+            });
+          }
+        } catch {
+          // Algumas BMs podem estar visíveis ao usuário sem liberar todos os edges.
+        }
+      }
+    }
+
+    return result;
   }
 
   campaigns(actId: string) {
