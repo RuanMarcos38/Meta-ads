@@ -17,6 +17,7 @@ const DIAGNOSTIC_JWT_SECRET = 'diagnostic-only-jwt-secret-change-this-in-product
 const DIAGNOSTIC_REFRESH_SECRET = 'diagnostic-only-refresh-secret-change-this-in-production-2026';
 const MIN_META_API_MAJOR = 25;
 const DEFAULT_META_API_VERSION = 'v25.0';
+const PRODUCTION_META_REDIRECT_URI = 'https://api-gestao.r2rmarketingdigital.com.br/meta/oauth/callback';
 
 function firstConfigured(keys: readonly string[]): string {
   for (const key of keys) {
@@ -159,6 +160,9 @@ const configuredJwtSecret = process.env.JWT_SECRET?.trim() || '';
 const configuredJwtRefreshSecret = process.env.JWT_REFRESH_SECRET?.trim() || '';
 const encryptionKey = process.env.ENCRYPTION_KEY?.trim() || '';
 const isProduction = nodeEnv === 'production';
+const metaRedirectUri = isProduction
+  ? PRODUCTION_META_REDIRECT_URI
+  : process.env.META_REDIRECT_URI?.trim() || PRODUCTION_META_REDIRECT_URI;
 
 if (isProduction) {
   if (!databaseUrl) configurationErrors.push('DATABASE_URL não foi configurada corretamente no EasyPanel.');
@@ -200,7 +204,7 @@ export const env = {
   meta: {
     appId: process.env.META_APP_ID?.trim() || '',
     appSecret: process.env.META_APP_SECRET?.trim() || '',
-    redirectUri: process.env.META_REDIRECT_URI?.trim() || '',
+    redirectUri: metaRedirectUri,
     apiVersion: normalizeMetaApiVersion(process.env.META_API_VERSION),
   },
 };
