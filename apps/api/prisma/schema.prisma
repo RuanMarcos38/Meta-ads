@@ -106,12 +106,14 @@ model MetaAdAccount {
   businessId     String?
   businessName   String?
   isActive       Boolean        @default(true)
+  isAssigned     Boolean        @default(false)
   campaigns      Campaign[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   @@index([organizationId, clientId])
   @@index([organizationId, clientId, businessId])
+  @@index([organizationId, clientId, isAssigned])
 }
 
 model Campaign {
