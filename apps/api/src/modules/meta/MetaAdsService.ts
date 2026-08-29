@@ -25,6 +25,27 @@ async function getPaged(url: string, params: Record<string, string>) {
   return results;
 }
 
+async function postForm<T>(url: string, accessToken: string, values: Record<string, string>): Promise<T> {
+  const body = new URLSearchParams();
+  body.set('access_token', accessToken);
+  for (const [key, value] of Object.entries(values)) body.set(key, value);
+
+  const response = await withRetry(() => axios.post(url, body, {
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+  }));
+  return response.data as T;
+}
+
+export type MetaCampaignObjective =
+  | 'OUTCOME_AWARENESS'
+  | 'OUTCOME_TRAFFIC'
+  | 'OUTCOME_ENGAGEMENT'
+  | 'OUTCOME_LEADS'
+  | 'OUTCOME_APP_PROMOTION'
+  | 'OUTCOME_SALES';
+
+export type MetaSpecialAdCategory = 'HOUSING' | 'EMPLOYMENT' | 'CREDIT' | 'ISSUES_ELECTIONS_POLITICS';
+
 export class MetaAdsService {
   constructor(private accessToken: string) {}
 
@@ -41,6 +62,31 @@ export class MetaAdsService {
       fields: 'id,name,objective,status,effective_status,buying_type,daily_budget,lifetime_budget,start_time,stop_time',
       limit: '200',
     });
+  }
+
+  createCampaign(actId: string, input: {
+    name: string;
+    objective: MetaCampaignObjective;
+    dailyBudgetCents?: number;
+    specialAdCategories?: MetaSpecialAdCategory[];
+  }) {
+    const values: Record<string, string> = {
+      name: input.name,
+      objective: input.objective,
+      status: 'PAUSED',
+      buying_type: 'AUCTION',
+      special_ad_categories: JSON.stringify(input.specialAdCategories ?? []),
+    };
+
+    if (input.dailyBudgetCents && input.dailyBudgetCents > 0) {
+      values.daily_budget = String(Math.round(input.dailyBudgetCents));
+    }
+
+    return postForm<{ id: string }>(`${BASE()}/${actId}/campaigns`, this.accessToken, values);
+  }
+
+  updateCampaignStatus(campaignId: string, status: 'ACTIVE' | 'PAUSED') {
+    return postForm<{ success?: boolean }>(`${BASE()}/${campaignId}`, this.accessToken, { status });
   }
 
   insights(actId: string, since: string, until: string, level = 'campaign') {
