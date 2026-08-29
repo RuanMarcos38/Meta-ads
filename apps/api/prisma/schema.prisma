@@ -103,12 +103,15 @@ model MetaAdAccount {
   currency       String?
   timezone       String?
   accountStatus  Int?
+  businessId     String?
+  businessName   String?
   isActive       Boolean        @default(true)
   campaigns      Campaign[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   @@index([organizationId, clientId])
+  @@index([organizationId, clientId, businessId])
 }
 
 model Campaign {
