@@ -10,6 +10,13 @@ export const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  // A sincronização Meta percorre várias contas e pode levar cerca de 1 minuto.
+  // Mantemos 15 s para as demais rotas e ampliamos somente este endpoint.
+  if (config.url?.includes('/dashboard/sync')) {
+    config.timeout = 120000;
+  }
+
   return config;
 });
 
