@@ -27,19 +27,19 @@ jobs:
         with:
           node-version: 20
 
-      - name: Validate deployment configuration
+      - name: Detect deployment configuration
         run: |
           set -euo pipefail
-          missing=0
+          ready=true
           for name in HOSTINGER_SFTP_HOST HOSTINGER_SFTP_USER HOSTINGER_SFTP_PASSWORD HOSTINGER_SFTP_PATH; do
             if [ -z "${!name:-}" ]; then
               echo "Secret ausente: ${name}"
-              missing=1
+              ready=false
             fi
           done
-          if [ "$missing" -ne 0 ]; then
-            echo "Configure os quatro secrets de SFTP antes de publicar."
-            exit 1
+          echo "HOSTINGER_DEPLOY_READY=${ready}" >> "$GITHUB_ENV"
+          if [ "$ready" != "true" ]; then
+            echo "SFTP ainda não configurado. O build será gerado e salvo como artifact para não bloquear a entrega."
           fi
 
       - name: Build frontend
@@ -47,13 +47,24 @@ jobs:
         env:
           VITE_API_BASE_URL: https://api-gestao.r2rmarketingdigital.com.br
         run: |
+          set -euo pipefail
           npm install
           npm run typecheck
           npm run build
-          echo "2026.08.01.1" > dist/deploy-version.txt
-          grep -R "2026.08.01.1" dist/assets >/dev/null
+          printf '%s\n' "${GITHUB_SHA}" > dist/deploy-version.txt
+          test -s dist/index.html
+          test -s dist/deploy-version.txt
+
+      - name: Package frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gestao-ads-frontend-${{ github.sha }}
+          path: apps/web/dist/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Deploy frontend via SFTP
+        if: env.HOSTINGER_DEPLOY_READY == 'true'
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
           server: ${{ secrets.HOSTINGER_SFTP_HOST }}
@@ -64,6 +75,7 @@ jobs:
           sftp_only: true
 
       - name: Deploy SPA rewrite file
+        if: env.HOSTINGER_DEPLOY_READY == 'true'
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
           server: ${{ secrets.HOSTINGER_SFTP_HOST }}
@@ -74,19 +86,28 @@ jobs:
           sftp_only: true
 
       - name: Verify published frontend
+        if: env.HOSTINGER_DEPLOY_READY == 'true'
         env:
-          EXPECTED_VERSION: 2026.08.01.1
+          EXPECTED_VERSION: ${{ github.sha }}
           FRONTEND_URL: https://gestao.r2rmarketingdigital.com.br
         run: |
           set -euo pipefail
           for attempt in $(seq 1 12); do
             body="$(curl -fsSL --connect-timeout 10 --max-time 20 "${FRONTEND_URL}/deploy-version.txt?sha=${GITHUB_SHA}&attempt=${attempt}" 2>/dev/null || true)"
-            if printf '%s' "$body" | grep -Fq "$EXPECTED_VERSION"; then
-              echo "Frontend publicado e validado na versão ${EXPECTED_VERSION}."
+            if [ "$body" = "$EXPECTED_VERSION" ]; then
+              echo "Frontend publicado e validado no commit ${EXPECTED_VERSION}."
               exit 0
             fi
-            echo "Tentativa ${attempt}/12: aguardando publicação."
+            echo "Tentativa ${attempt}/12: aguardando publicação do commit atual."
             sleep 10
           done
-          echo "O upload terminou, mas a versão publicada não foi confirmada."
+          echo "O upload terminou, mas o commit publicado não foi confirmado."
           exit 1
+
+      - name: Deployment summary
+        run: |
+          if [ "${HOSTINGER_DEPLOY_READY}" = "true" ]; then
+            echo "Frontend enviado para a Hostinger e verificado pelo SHA do commit."
+          else
+            echo "Frontend compilado com sucesso e salvo como artifact. Publicação SFTP aguardando os secrets da Hostinger."
+          fi
