@@ -8,10 +8,7 @@ import { ok } from './shared/response.js';
 const REQUIRED_SCOPES = ['ads_read', 'ads_management', 'business_management'] as const;
 const RECOMMENDED_API_VERSION = 'v25.0';
 const EXPECTED_REDIRECT_URI = 'https://api-gestao.r2rmarketingdigital.com.br/meta/oauth/callback';
-const EXPECTED_APP_DOMAINS = [
-  'gestao.r2rmarketingdigital.com.br',
-  'api-gestao.r2rmarketingdigital.com.br',
-];
+const EXPECTED_APP_DOMAINS = ['r2rmarketingdigital.com.br'];
 
 function configurationReady() {
   return Boolean(env.meta.appId && env.meta.appSecret && env.meta.redirectUri);
