@@ -1,15 +1,38 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import axios from 'axios';
 import { prisma } from './shared/prisma.js';
 import { ok, fail } from './shared/response.js';
 import { requireAuth, scopeClient, AuthUser } from './shared/auth.js';
 import { verifyPassword } from './shared/password.js';
+import { encrypt } from './shared/crypto.js';
 import { env } from './config/env.js';
 import { runSync } from './modules/meta/syncService.js';
+import { MetaAdsService } from './modules/meta/MetaAdsService.js';
 import { demoSummary, demoCampaigns, demoDaily } from './modules/demo/demoData.js';
 
 const VERSION = '1.3.0';
+const META_OAUTH_SCOPES = ['ads_read', 'business_management'];
 const asNumber = (value: unknown) => Number(value ?? 0);
+
+function metaGraphBase() {
+  return `https://graph.facebook.com/${env.meta.apiVersion}`;
+}
+
+function htmlPage(title: string, message: string) {
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font-family:Arial,sans-serif;background:#0f172a;color:#e5e7eb;display:grid;min-height:100vh;place-items:center;margin:0}.card{max-width:520px;padding:32px;border:1px solid #334155;border-radius:16px;background:#111827}h1{margin:0 0 12px;font-size:24px}p{line-height:1.5;color:#cbd5e1}</style></head><body><main class="card"><h1>${title}</h1><p>${message}</p></main></body></html>`;
+}
+
+function metaConfigurationReady() {
+  return Boolean(env.meta.appId && env.meta.appSecret && env.meta.redirectUri);
+}
+
+function metaConfigFailure(reply: any) {
+  return reply.code(503).send(fail(
+    'META_CONFIGURATION_ERROR',
+    'Configure META_APP_ID, META_APP_SECRET e META_REDIRECT_URI no EasyPanel.',
+  ));
+}
 
 function configurationFailure(reply: any) {
   return reply.code(503).send(fail(
@@ -336,6 +359,182 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.code(502).send(fail('META_SYNC_ERROR', 'Falha ao sincronizar com a Meta.', {
         detail: env.isProduction ? undefined : error?.message,
       }));
+    }
+  });
+
+  // META OAUTH
+  app.get('/meta/oauth/start', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
+    if (!metaConfigurationReady()) return metaConfigFailure(reply);
+
+    const u = req.user as AuthUser;
+    const query = z.object({ clientId: z.string().min(1) }).safeParse(req.query);
+    if (!query.success) {
+      return reply.code(400).send(fail('CLIENT_REQUIRED', 'Informe o clientId que receberá a conexão Meta.'));
+    }
+
+    const client = await prisma.client.findFirst({
+      where: { id: query.data.clientId, organizationId: u.organizationId! },
+      select: { id: true },
+    });
+    if (!client) return reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Cliente não encontrado para este acesso.'));
+
+    const state = app.jwt.sign({
+      type: 'meta_oauth',
+      userId: u.id,
+      organizationId: u.organizationId,
+      clientId: client.id,
+    }, { expiresIn: '10m' });
+
+    const authUrl = new URL(`https://www.facebook.com/${env.meta.apiVersion}/dialog/oauth`);
+    authUrl.searchParams.set('client_id', env.meta.appId);
+    authUrl.searchParams.set('redirect_uri', env.meta.redirectUri);
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('scope', META_OAUTH_SCOPES.join(','));
+
+    return ok({ authUrl: authUrl.toString(), scopes: META_OAUTH_SCOPES });
+  });
+
+  app.get('/meta/oauth/callback', async (req, reply) => {
+    const query = z.object({
+      code: z.string().min(1).optional(),
+      state: z.string().min(1).optional(),
+      error: z.string().optional(),
+      error_description: z.string().optional(),
+    }).safeParse(req.query);
+    if (!query.success) return reply.code(400).type('text/html').send(htmlPage('Meta Ads', 'Callback inválido.'));
+
+    if (query.data.error) {
+      return reply.code(400).type('text/html').send(htmlPage(
+        'Conexão Meta cancelada',
+        query.data.error_description || 'A Meta recusou ou cancelou a autorização.',
+      ));
+    }
+
+    if (!query.data.code || !query.data.state) {
+      return reply.type('text/html').send(htmlPage(
+        'Callback Meta ativo',
+        'Este endpoint está pronto para receber autorizações do Meta Developers.',
+      ));
+    }
+
+    if (!metaConfigurationReady()) {
+      return reply.code(503).type('text/html').send(htmlPage(
+        'Configuração Meta ausente',
+        'Configure META_APP_ID, META_APP_SECRET e META_REDIRECT_URI no EasyPanel.',
+      ));
+    }
+
+    try {
+      const state = app.jwt.verify(query.data.state) as {
+        type?: string;
+        userId?: string;
+        organizationId?: string;
+        clientId?: string;
+      };
+      if (state.type !== 'meta_oauth' || !state.organizationId || !state.clientId) {
+        throw new Error('Estado OAuth inválido.');
+      }
+
+      const shortToken = await axios.get(`${metaGraphBase()}/oauth/access_token`, {
+        params: {
+          client_id: env.meta.appId,
+          client_secret: env.meta.appSecret,
+          redirect_uri: env.meta.redirectUri,
+          code: query.data.code,
+        },
+      });
+
+      let tokenPayload = shortToken.data as { access_token: string; expires_in?: number };
+      try {
+        const longToken = await axios.get(`${metaGraphBase()}/oauth/access_token`, {
+          params: {
+            grant_type: 'fb_exchange_token',
+            client_id: env.meta.appId,
+            client_secret: env.meta.appSecret,
+            fb_exchange_token: tokenPayload.access_token,
+          },
+        });
+        tokenPayload = longToken.data;
+      } catch {
+        // Se a troca por token longo falhar, o token curto ainda permite concluir a conexão.
+      }
+
+      const tokenExpiresAt = tokenPayload.expires_in
+        ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000)
+        : undefined;
+      const me = await axios.get(`${metaGraphBase()}/me`, {
+        params: { fields: 'id,name', access_token: tokenPayload.access_token },
+      });
+
+      await prisma.metaConnection.updateMany({
+        where: { organizationId: state.organizationId, clientId: state.clientId, status: 'active' },
+        data: { status: 'replaced' },
+      });
+      const connection = await prisma.metaConnection.create({
+        data: {
+          organizationId: state.organizationId,
+          clientId: state.clientId,
+          metaUserId: String(me.data.id || ''),
+          accessTokenEncrypted: encrypt(tokenPayload.access_token),
+          tokenExpiresAt,
+          scopes: META_OAUTH_SCOPES.join(','),
+          status: 'active',
+        },
+      });
+
+      const meta = new MetaAdsService(tokenPayload.access_token);
+      const accounts = await meta.adAccounts();
+      for (const account of accounts) {
+        const existing = await prisma.metaAdAccount.findFirst({
+          where: {
+            organizationId: state.organizationId,
+            clientId: state.clientId,
+            accountId: String(account.account_id),
+          },
+        });
+        const data = {
+          name: account.name,
+          currency: account.currency,
+          timezone: account.timezone_name,
+          accountStatus: account.account_status ? Number(account.account_status) : null,
+          connectionId: connection.id,
+          isActive: true,
+        };
+        if (existing) {
+          await prisma.metaAdAccount.update({ where: { id: existing.id }, data });
+        } else {
+          await prisma.metaAdAccount.create({
+            data: {
+              organizationId: state.organizationId,
+              clientId: state.clientId,
+              accountId: String(account.account_id),
+              ...data,
+            },
+          });
+        }
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          organizationId: state.organizationId,
+          userId: state.userId,
+          action: 'META_CONNECTED',
+          entity: 'MetaConnection',
+          entityId: connection.id,
+          metadataJson: { accountCount: accounts.length },
+        },
+      });
+
+      return reply.type('text/html').send(htmlPage(
+        'Meta Ads conectado',
+        `Conexão salva com sucesso. Contas de anúncio localizadas: ${accounts.length}. Você já pode voltar ao painel e atualizar os dados.`,
+      ));
+    } catch {
+      return reply.code(400).type('text/html').send(htmlPage(
+        'Falha na conexão Meta',
+        'Não foi possível concluir a autorização. Revise o app no Meta Developers e tente novamente.',
+      ));
     }
   });
 
