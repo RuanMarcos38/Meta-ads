@@ -9,6 +9,7 @@ import { registerOperationalRoutes } from './operationalRoutes.js';
 import { registerDatabaseDiagnostics } from './databaseDiagnostics.js';
 import { registerMetaDiagnostics } from './metaDiagnostics.js';
 import { registerMetaDisconnectRoutes } from './metaDisconnectRoutes.js';
+import { registerTenantRoutes } from './tenantRoutes.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -23,5 +24,6 @@ export async function buildApp() {
   await registerOperationalRoutes(app);
   await registerMetaDiagnostics(app);
   await registerMetaDisconnectRoutes(app);
+  await registerTenantRoutes(app);
   return app;
 }
