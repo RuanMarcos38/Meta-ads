@@ -35,7 +35,7 @@ api.interceptors.response.use(
       if (refresh) {
         try {
           refreshRequest ??= axios
-            .post(`${apiBaseURL}/auth/refresh`, { refresh }, { timeout: 15000 })
+            .post(`${apiBaseURL}/auth/refresh-bm`, { refresh }, { timeout: 15000 })
             .then((response) => response.data.data.token as string)
             .finally(() => { refreshRequest = null; });
 
