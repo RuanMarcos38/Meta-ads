@@ -6,6 +6,7 @@ export interface AuthUser {
   role: string;
   organizationId?: string;
   clientId?: string;
+  businessId?: string;
 }
 
 const NO_CLIENT_SCOPE = '00000000-0000-0000-0000-000000000000';
