@@ -4,9 +4,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import Login from './pages/Login';
 import Layout from './components/Layout';
-import Dashboard from './pages/Dashboard';
-import Campaigns from './pages/Campaigns';
-import Clients from './pages/Clients';
+import Dashboard from './pages/DashboardScoped';
+import Campaigns from './pages/CampaignsScoped';
+import Clients from './pages/ClientsScoped';
 import { useAuth } from './store';
 
 function Private({ children }: { children: React.ReactNode }) {
