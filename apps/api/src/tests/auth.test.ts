@@ -6,6 +6,8 @@ const baseUser = {
   organizationId: 'org-r2r',
 };
 
+const EMPTY_TENANT_UUID = '00000000-0000-0000-0000-000000000000';
+
 describe('scopeClient', () => {
   it('ignora clientId solicitado por usuário CLIENT', () => {
     expect(scopeClient({ ...baseUser, role: 'CLIENT', clientId: 'client-a' }, 'client-b'))
@@ -19,12 +21,12 @@ describe('scopeClient', () => {
 
   it('nunca libera consolidado para CLIENT sem empresa atribuída', () => {
     expect(scopeClient({ ...baseUser, role: 'CLIENT' }, 'client-b'))
-      .toBe('__no_assigned_client__');
+      .toBe(EMPTY_TENANT_UUID);
   });
 
   it('nunca libera consolidado para MANAGER sem empresa atribuída', () => {
     expect(scopeClient({ ...baseUser, role: 'MANAGER' }, 'client-b'))
-      .toBe('__no_assigned_client__');
+      .toBe(EMPTY_TENANT_UUID);
   });
 
   it('permite filtro explícito para administrador', () => {
