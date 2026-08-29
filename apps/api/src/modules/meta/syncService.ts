@@ -17,8 +17,16 @@ export async function runSync(
   });
 
   try {
+    // Regra multiempresa: somente contas ativas e explicitamente vinculadas ao cliente
+    // podem alimentar campanhas, insights e dashboards. Contas apenas descobertas no OAuth
+    // permanecem disponíveis para o administrador selecionar, mas nunca entram no sync.
     const accounts = await prisma.metaAdAccount.findMany({
-      where: { organizationId, ...(clientId ? { clientId } : {}), isActive: true },
+      where: {
+        organizationId,
+        ...(clientId ? { clientId } : {}),
+        isActive: true,
+        isAssigned: true,
+      },
       include: { connection: true },
     });
 
