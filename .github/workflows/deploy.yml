@@ -54,12 +54,14 @@ jobs:
           printf '%s\n' "${GITHUB_SHA}" > dist/deploy-version.txt
           test -s dist/index.html
           test -s dist/deploy-version.txt
+          test -s dist/.htaccess
 
       - name: Package frontend artifact
         uses: actions/upload-artifact@v4
         with:
           name: gestao-ads-frontend-${{ github.sha }}
           path: apps/web/dist/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
