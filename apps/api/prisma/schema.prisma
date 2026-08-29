@@ -44,6 +44,7 @@ model User {
   organization       Organization? @relation(fields: [organizationId], references: [id])
   clientId           String?
   client             Client?       @relation(fields: [clientId], references: [id])
+  businessId         String?
   isActive           Boolean       @default(true)
   mustChangePassword Boolean       @default(false)
   lastLoginAt        DateTime?
@@ -52,6 +53,7 @@ model User {
 
   @@index([organizationId])
   @@index([clientId])
+  @@index([clientId, businessId])
 }
 
 model Client {
@@ -62,17 +64,21 @@ model Client {
   companyName         String?
   document            String?
   email               String?
-  phone                String?
+  phone               String?
   segment             String?
   status              String       @default("active")
   notes               String?
   primaryResultAction String?
+  metaBusinessId      String?
+  metaBusinessName    String?
+  metaAdminEmail      String?
   users               User[]
   adAccounts          MetaAdAccount[]
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
   @@index([organizationId])
+  @@index([organizationId, metaBusinessId])
 }
 
 model MetaConnection {
@@ -215,13 +221,13 @@ model SyncJob {
   organizationId   String
   clientId          String?
   adAccountId       String?
-  type               String
-  status             String   @default("running")
-  startedAt          DateTime @default(now())
-  finishedAt         DateTime?
-  errorMessage       String?
-  recordsProcessed   Int      @default(0)
-  createdBy          String?
+  type              String
+  status            String   @default("running")
+  startedAt         DateTime @default(now())
+  finishedAt        DateTime?
+  errorMessage      String?
+  recordsProcessed Int      @default(0)
+  createdBy         String?
 
   @@index([organizationId, startedAt])
 }
