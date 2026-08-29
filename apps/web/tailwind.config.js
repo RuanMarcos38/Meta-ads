@@ -3,7 +3,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        brand: { bg: '#0b0f1a', card: '#141a2b', border: '#232b40', blue: '#3b82f6', purple: '#8b5cf6', neon: '#22d3ee' },
+        brand: {
+          bg: '#f4f6f2',
+          card: '#ffffff',
+          border: '#e1e8dd',
+          blue: '#0b6b45',
+          purple: '#123d2d',
+          neon: '#62b783',
+        },
+      },
+      boxShadow: {
+        soft: '0 18px 45px rgba(22, 44, 32, 0.08)',
       },
     },
   },
