@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../store';
 
@@ -8,6 +9,23 @@ type MetaClientStatus = {
   accountCount: number;
   tokenExpiresAt?: string | null;
   connectedAt?: string | null;
+};
+
+type MetaDiagnostics = {
+  configured: boolean;
+  graphReachable: boolean;
+  appCredentialsValid: boolean;
+  graphErrorCode?: string | number | null;
+  apiVersion: string;
+  recommendedApiVersion: string;
+  apiVersionCurrent: boolean;
+  redirectUri: string;
+  redirectUriMatchesProduction: boolean;
+  expectedRedirectUri: string;
+  expectedAppDomains: string[];
+  requiredScopes: string[];
+  activeConnections: number;
+  activeAccounts: number;
 };
 
 export default function Clients() {
@@ -21,6 +39,7 @@ export default function Clients() {
   const [connectingId, setConnectingId] = useState('');
   const [metaConfigured, setMetaConfigured] = useState(true);
   const [metaStatuses, setMetaStatuses] = useState<Record<string, MetaClientStatus>>({});
+  const [diagnostics, setDiagnostics] = useState<MetaDiagnostics | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -32,9 +51,10 @@ export default function Clients() {
 
     setError('');
     try {
-      const [clientsResponse, metaResponse] = await Promise.all([
+      const [clientsResponse, metaResponse, diagnosticsResponse] = await Promise.all([
         api.get('/clients'),
         api.get('/meta/status').catch(() => null),
+        canCreate ? api.get('/meta/diagnostics').catch(() => null) : Promise.resolve(null),
       ]);
       setRows(Array.isArray(clientsResponse.data.data) ? clientsResponse.data.data : []);
 
@@ -43,6 +63,12 @@ export default function Clients() {
         setMetaConfigured(Boolean(metaData.configured));
         const entries = Array.isArray(metaData.clients) ? metaData.clients : [];
         setMetaStatuses(Object.fromEntries(entries.map((item: MetaClientStatus) => [item.clientId, item])));
+      }
+
+      const diagnosticsData = diagnosticsResponse?.data?.data as MetaDiagnostics | undefined;
+      if (diagnosticsData) {
+        setDiagnostics(diagnosticsData);
+        setMetaConfigured(Boolean(diagnosticsData.configured));
       }
     } catch {
       setError('Não foi possível carregar os clientes deste acesso.');
@@ -77,7 +103,7 @@ export default function Clients() {
     if (!canCreate) return;
     setConnectingId(clientId);
     setError('');
-    setNotice('');
+    setNotice('Abrindo a autorização oficial da Meta. Conclua o acesso na janela que será exibida.');
 
     const popup = window.open('about:blank', 'gestao-ads-meta-oauth', 'width=760,height=860');
     try {
@@ -93,10 +119,21 @@ export default function Clients() {
       popup.location.href = authUrl;
       const startedAt = Date.now();
       const poll = window.setInterval(async () => {
-        const timedOut = Date.now() - startedAt > 180_000;
+        const timedOut = Date.now() - startedAt > 120_000;
         if (popup.closed || timedOut) {
           window.clearInterval(poll);
           setConnectingId('');
+          const statusResponse = await api.get('/meta/status', { params: { clientId } }).catch(() => null);
+          const statuses = statusResponse?.data?.data?.clients;
+          const connected = Array.isArray(statuses)
+            && statuses.some((item: MetaClientStatus) => item.clientId === clientId && item.connected);
+
+          if (!connected) {
+            setNotice('');
+            setError(timedOut
+              ? 'A Meta não concluiu a autorização. Se apareceu “URL bloqueada”, ajuste os Domínios do app e o Redirect OAuth no Meta Developers conforme o quadro abaixo.'
+              : 'A janela da Meta foi fechada antes da conexão ser concluída.');
+          }
           await load();
           return;
         }
@@ -120,82 +157,160 @@ export default function Clients() {
     } catch {
       popup?.close();
       setConnectingId('');
+      setNotice('');
       setError('Não foi possível iniciar a conexão com a Meta. Confira as variáveis do app no EasyPanel.');
     }
   }
 
   if (!canView) {
-    return <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-300">Seu perfil não possui acesso ao cadastro de clientes.</p>;
+    return <p className="rounded-[10px] border border-amber-200 bg-amber-50 p-4 text-amber-800">Seu perfil não possui acesso ao cadastro de clientes.</p>;
   }
 
+  const hasActiveConnection = Object.values(metaStatuses).some((item) => item.connected);
+  const diagnosticsHealthy = Boolean(
+    diagnostics?.configured
+    && diagnostics?.appCredentialsValid
+    && diagnostics?.redirectUriMatchesProduction,
+  );
+
   return (
-    <div>
-      <div className="flex items-center justify-between gap-3 mb-4">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Clientes</h1>
-          <p className="mt-1 text-sm text-slate-500">Cadastre o cliente e conecte as contas Meta Ads sem sair da operação.</p>
+          <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">Configuração comercial</p>
+          <h1 className="text-2xl font-bold tracking-[-0.02em] text-[#17231d]">Clientes</h1>
+          <p className="mt-1.5 text-sm text-slate-500">Cadastre cada operação e conecte suas contas Meta Ads com isolamento por cliente.</p>
         </div>
-        <button onClick={() => { setLoading(true); void load(); }} className="px-3 py-2 rounded-lg border border-brand-border text-sm text-slate-600 hover:bg-black/5">Atualizar</button>
+        <button
+          onClick={() => { setLoading(true); void load(); }}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-[9px] border border-brand-border bg-white px-3.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-[#f5f7f5]"
+        >
+          <RefreshCw size={15} />
+          Atualizar
+        </button>
       </div>
 
+      {canCreate && diagnostics && !hasActiveConnection && (
+        <section className="rounded-[12px] border border-[#dbe4dd] bg-[#f8faf8] p-4 md:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-white text-brand-blue ring-1 ring-[#dbe4dd]">
+                  <ShieldCheck size={17} />
+                </span>
+                <div>
+                  <h2 className="text-sm font-bold text-[#213129]">Diagnóstico da integração Meta</h2>
+                  <p className="mt-0.5 text-xs text-slate-500">Configuração do backend e dados que devem coincidir no Meta Developers.</p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+                <div className="rounded-[9px] border border-[#e0e6e1] bg-white px-3.5 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">Credenciais do app</p>
+                  <div className="mt-1.5 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    {diagnostics.appCredentialsValid ? <CheckCircle2 size={15} className="text-emerald-600" /> : <AlertTriangle size={15} className="text-amber-600" />}
+                    {diagnostics.appCredentialsValid ? 'Validadas pelo backend' : 'Não validadas pela Meta'}
+                  </div>
+                </div>
+                <div className="rounded-[9px] border border-[#e0e6e1] bg-white px-3.5 py-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">Graph API</p>
+                  <div className="mt-1.5 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    {diagnostics.apiVersionCurrent ? <CheckCircle2 size={15} className="text-emerald-600" /> : <AlertTriangle size={15} className="text-amber-600" />}
+                    {diagnostics.apiVersion}{diagnostics.apiVersionCurrent ? '' : ` · recomendado ${diagnostics.recommendedApiVersion}`}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <span className={[
+              'inline-flex w-fit items-center rounded-full px-3 py-1.5 text-xs font-bold',
+              diagnosticsHealthy ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800',
+            ].join(' ')}>
+              {diagnosticsHealthy ? 'Backend Meta preparado' : 'Ajustes externos necessários'}
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <div className="rounded-[9px] border border-[#e0e6e1] bg-white p-3.5 lg:col-span-2">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">Valid OAuth Redirect URI</p>
+              <p className="mt-2 break-all font-mono text-[12px] leading-5 text-slate-700">{diagnostics.expectedRedirectUri}</p>
+            </div>
+            <div className="rounded-[9px] border border-[#e0e6e1] bg-white p-3.5">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">App Domains</p>
+              <div className="mt-2 space-y-1 font-mono text-[12px] leading-5 text-slate-700">
+                {diagnostics.expectedAppDomains.map((domain) => <p key={domain}>{domain}</p>)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-[9px] border border-[#e5e9e5] bg-white px-3.5 py-3 text-xs leading-5 text-slate-600">
+            <strong className="font-bold text-slate-800">Se aparecer “URL bloqueada”:</strong> em Meta Developers, coloque os domínios acima em <strong>Configurações do app → Básico → Domínios do aplicativo</strong> sem <code>https://</code>. Depois coloque o redirect exato em <strong>Login do Facebook para Empresas → Configurações → URIs de redirecionamento OAuth válidos</strong>, com Client OAuth Login e Web OAuth Login ativados.
+          </div>
+          <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+            <ExternalLink size={14} />
+            Permissões solicitadas: {diagnostics.requiredScopes.join(', ')}
+          </div>
+        </section>
+      )}
+
       {canCreate && (
-        <form onSubmit={create} className="flex flex-col sm:flex-row gap-2 mb-4">
+        <form onSubmit={create} className="flex flex-col gap-2 sm:flex-row">
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Nome do cliente"
             minLength={2}
             required
-            className="flex-1 px-3 py-2 rounded-lg bg-white border border-brand-border outline-none focus:border-brand-blue"
+            className="h-11 flex-1 rounded-[9px] border border-brand-border bg-white px-3.5 text-sm outline-none transition-colors placeholder:text-slate-400 focus:border-[#91b19f]"
           />
-          <button disabled={saving} className="px-4 py-2 rounded-lg bg-brand-blue text-white text-sm font-medium disabled:opacity-50">
+          <button disabled={saving} className="h-11 rounded-[9px] bg-brand-blue px-5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-brand-purple disabled:opacity-50">
             {saving ? 'Cadastrando...' : 'Cadastrar'}
           </button>
         </form>
       )}
 
       {!metaConfigured && canCreate && (
-        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+        <p className="rounded-[9px] border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800">
           A integração Meta ainda não está completa no servidor. Confira META_APP_ID, META_APP_SECRET e META_REDIRECT_URI no EasyPanel.
         </p>
       )}
-      {notice && <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</p>}
-      {error && <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p>}
+      {notice && <p className="rounded-[9px] border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-sm text-emerald-800">{notice}</p>}
+      {error && <p className="rounded-[9px] border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700" role="alert">{error}</p>}
 
-      <div className="bg-white border border-brand-border rounded-xl p-4">
+      <div className="overflow-hidden rounded-[12px] border border-brand-border bg-white">
         {loading ? (
-          <p className="text-sm text-slate-500">Carregando clientes...</p>
+          <p className="px-4 py-6 text-sm text-slate-500">Carregando clientes...</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[880px] text-sm">
-              <thead className="text-slate-500 text-left">
-                <tr><th className="py-2">Nome</th><th>Empresa</th><th>Segmento</th><th>Status</th><th>Meta Ads</th><th className="text-right">Ação</th></tr>
+              <thead className="border-b border-brand-border bg-[#fafbfa] text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
+                <tr><th className="px-4 py-3">Nome</th><th className="px-3 py-3">Empresa</th><th className="px-3 py-3">Segmento</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Meta Ads</th><th className="px-4 py-3 text-right">Ação</th></tr>
               </thead>
               <tbody>
                 {rows.map((client) => {
                   const meta = metaStatuses[String(client.id)];
                   return (
-                    <tr key={String(client.id)} className="border-t border-brand-border">
-                      <td className="py-3 font-medium text-slate-900">{client.name}</td>
-                      <td>{client.companyName || '-'}</td>
-                      <td>{client.segment || '-'}</td>
-                      <td>{client.status || '-'}</td>
-                      <td>
+                    <tr key={String(client.id)} className="border-b border-[#edf0ed] last:border-b-0 hover:bg-[#fbfcfb]">
+                      <td className="px-4 py-3.5 font-semibold text-[#1d2b23]">{client.name}</td>
+                      <td className="px-3 text-slate-600">{client.companyName || '-'}</td>
+                      <td className="px-3 text-slate-600">{client.segment || '-'}</td>
+                      <td className="px-3 text-slate-600">{client.status || '-'}</td>
+                      <td className="px-3">
                         {meta?.connected ? (
-                          <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                          <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">
                             Conectado · {meta.accountCount} conta{meta.accountCount === 1 ? '' : 's'}
                           </span>
                         ) : (
-                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">Não conectado</span>
+                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">Não conectado</span>
                         )}
                       </td>
-                      <td className="text-right">
+                      <td className="px-4 text-right">
                         {canCreate ? (
                           <button
                             type="button"
                             onClick={() => { void connectMeta(String(client.id)); }}
                             disabled={!metaConfigured || connectingId === String(client.id)}
-                            className="rounded-lg border border-brand-border px-3 py-2 text-xs font-bold text-brand-blue transition hover:bg-[#eef4eb] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-[8px] border border-[#cad7ce] bg-white px-3 py-2 text-xs font-bold text-brand-blue transition-colors hover:bg-[#f0f5f1] disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {connectingId === String(client.id) ? 'Conectando...' : meta?.connected ? 'Reconectar Meta' : 'Conectar Meta'}
                           </button>
@@ -210,7 +325,7 @@ export default function Clients() {
             </table>
           </div>
         )}
-        {!loading && !rows.length && !error && <p className="py-5 text-sm text-slate-500">Nenhum cliente encontrado para este acesso.</p>}
+        {!loading && !rows.length && !error && <p className="px-4 py-6 text-sm text-slate-500">Nenhum cliente encontrado para este acesso.</p>}
       </div>
     </div>
   );
