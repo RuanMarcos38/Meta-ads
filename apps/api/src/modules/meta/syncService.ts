@@ -1,12 +1,11 @@
 import { prisma } from '../../shared/prisma.js';
 import { decrypt } from '../../shared/crypto.js';
-import { MetaAdsService } from './MetaAdsService.js';
+import { MetaAdsService, type MetaBusinessRef } from './MetaAdsService.js';
 import { mapMetaActions } from './metaActions.js';
 import dayjs from 'dayjs';
 
 export type SyncJobType = 'manual' | 'automatic' | 'oauth';
 
-// Dispara sincronização real das contas Meta de um cliente.
 export async function runSync(
   organizationId: string,
   clientId: string | undefined,
@@ -26,23 +25,43 @@ export async function runSync(
     let processed = 0;
     const since = dayjs().subtract(30, 'day').format('YYYY-MM-DD');
     const until = dayjs().format('YYYY-MM-DD');
+    const businessMaps = new Map<string, Map<string, MetaBusinessRef>>();
 
     for (const acc of accounts) {
       if (acc.connection.organizationId !== organizationId) {
         throw new Error('Conexão Meta não pertence à organização autenticada.');
       }
-      if (acc.connection.status !== 'active') {
-        continue;
-      }
+      if (acc.connection.status !== 'active') continue;
       if (clientId && acc.clientId !== clientId) {
         throw new Error('Conta de anúncio não pertence ao cliente autenticado.');
       }
 
       const token = decrypt(acc.connection.accessTokenEncrypted);
       const meta = new MetaAdsService(token);
-      const metaAccountId = acc.accountId.startsWith('act_') ? acc.accountId : `act_${acc.accountId}`;
 
+      if (!businessMaps.has(acc.connectionId)) {
+        try {
+          businessMaps.set(acc.connectionId, await meta.businessAdAccountMap());
+        } catch {
+          businessMaps.set(acc.connectionId, new Map());
+        }
+      }
+
+      const normalizedAccountId = String(acc.accountId).replace(/^act_/, '');
+      const business = businessMaps.get(acc.connectionId)?.get(normalizedAccountId);
+      if (business && (acc.businessId !== business.businessId || acc.businessName !== business.businessName)) {
+        await prisma.metaAdAccount.update({
+          where: { id: acc.id },
+          data: {
+            businessId: business.businessId,
+            businessName: business.businessName,
+          },
+        });
+      }
+
+      const metaAccountId = acc.accountId.startsWith('act_') ? acc.accountId : `act_${acc.accountId}`;
       const campaigns = await meta.campaigns(metaAccountId);
+
       for (const campaign of campaigns) {
         await prisma.campaign.upsert({
           where: {
