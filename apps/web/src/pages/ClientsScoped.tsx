@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, ShieldCheck, UserPlus } from 'lucide-react';
+import { Link2, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../store';
 
@@ -8,6 +8,19 @@ type MetaClientStatus = {
   connected: boolean;
   accountCount: number;
   tokenExpiresAt?: string | null;
+};
+
+type MetaAccount = {
+  id: string;
+  clientId: string;
+  accountId: string;
+  name?: string | null;
+  currency?: string | null;
+  businessId?: string | null;
+  businessName?: string | null;
+  accountStatus?: number | null;
+  isActive: boolean;
+  isAssigned: boolean;
 };
 
 type TenantUser = {
@@ -27,11 +40,13 @@ export default function ClientsScoped() {
   const canAdmin = ['SUPER_ADMIN', 'AGENCY_ADMIN'].includes(user?.role || '');
   const [rows, setRows] = useState<Record<string, any>[]>([]);
   const [metaStatuses, setMetaStatuses] = useState<Record<string, MetaClientStatus>>({});
+  const [accounts, setAccounts] = useState<MetaAccount[]>([]);
   const [users, setUsers] = useState<TenantUser[]>([]);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [connectingId, setConnectingId] = useState('');
   const [disconnectingId, setDisconnectingId] = useState('');
+  const [assigningAccountId, setAssigningAccountId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -51,9 +66,10 @@ export default function ClientsScoped() {
     }
     setError('');
     try {
-      const [clientsResponse, metaResponse, usersResponse] = await Promise.all([
+      const [clientsResponse, metaResponse, contextResponse, usersResponse] = await Promise.all([
         api.get('/clients'),
         api.get('/meta/status').catch(() => null),
+        canAdmin ? api.get('/dashboard/context').catch(() => null) : Promise.resolve(null),
         canAdmin ? api.get('/access/users').catch(() => null) : Promise.resolve(null),
       ]);
 
@@ -67,6 +83,8 @@ export default function ClientsScoped() {
       ));
 
       if (canAdmin) {
+        const availableAccounts = contextResponse?.data?.data?.accounts;
+        setAccounts(Array.isArray(availableAccounts) ? availableAccounts : []);
         setUsers(Array.isArray(usersResponse?.data?.data) ? usersResponse.data.data : []);
       }
     } catch (requestError: any) {
@@ -82,6 +100,16 @@ export default function ClientsScoped() {
     () => Object.fromEntries(rows.map((client) => [String(client.id), String(client.name || 'Empresa')])),
     [rows],
   );
+
+  const assignmentSummary = useMemo(() => {
+    const map: Record<string, { total: number; assigned: number }> = {};
+    for (const account of accounts) {
+      map[account.clientId] ??= { total: 0, assigned: 0 };
+      map[account.clientId].total += 1;
+      if (account.isAssigned) map[account.clientId].assigned += 1;
+    }
+    return map;
+  }, [accounts]);
 
   async function createClient(event: React.FormEvent) {
     event.preventDefault();
@@ -141,7 +169,7 @@ export default function ClientsScoped() {
           popup.close();
           window.clearInterval(poll);
           setConnectingId('');
-          setNotice('Meta Ads conectado com sucesso.');
+          setNotice('Meta Ads conectado. Agora selecione abaixo quais contas pertencem a esta empresa.');
           await load();
         }
       }, 2500);
@@ -168,6 +196,24 @@ export default function ClientsScoped() {
       setError(requestError?.response?.data?.message || 'Não foi possível desconectar a Meta Ads.');
     } finally {
       setDisconnectingId('');
+    }
+  }
+
+  async function toggleAccountAssignment(account: MetaAccount) {
+    if (!canAdmin) return;
+    setAssigningAccountId(account.id);
+    setError('');
+    setNotice('');
+    try {
+      await api.patch(`/meta/client-accounts/${account.id}/assignment`, { isAssigned: !account.isAssigned });
+      setNotice(account.isAssigned
+        ? 'Conta removida do dashboard e dos usuários desta empresa. O histórico foi preservado.'
+        : 'Conta vinculada à empresa. Ela passa a fazer parte do dashboard e das sincronizações.');
+      await load();
+    } catch (requestError: any) {
+      setError(requestError?.response?.data?.message || 'Não foi possível alterar a vinculação desta conta Meta.');
+    } finally {
+      setAssigningAccountId('');
     }
   }
 
@@ -249,14 +295,15 @@ export default function ClientsScoped() {
           <p className="px-4 py-7 text-sm text-slate-500">Carregando clientes...</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
+            <table className="w-full min-w-[940px] text-sm">
               <thead className="bg-[#fafbfa] text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-                <tr><th className="px-4 py-3">Empresa</th><th className="px-3 py-3">Segmento</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Meta Ads</th><th className="px-4 py-3 text-right">Ação</th></tr>
+                <tr><th className="px-4 py-3">Empresa</th><th className="px-3 py-3">Segmento</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Meta Ads</th><th className="px-3 py-3">Contas no dashboard</th><th className="px-4 py-3 text-right">Ação</th></tr>
               </thead>
               <tbody>
                 {rows.map((client) => {
                   const id = String(client.id);
                   const meta = metaStatuses[id];
+                  const assignment = assignmentSummary[id] || { total: 0, assigned: 0 };
                   const busy = connectingId === id || disconnectingId === id;
                   return (
                     <tr key={id} className="border-t border-[#eef1ef] text-[13px]">
@@ -264,8 +311,9 @@ export default function ClientsScoped() {
                       <td className="px-3 py-3.5 text-slate-500">{client.segment || '-'}</td>
                       <td className="px-3 py-3.5 text-slate-500">{client.status || '-'}</td>
                       <td className="px-3 py-3.5">
-                        {meta?.connected ? <span className="inline-flex rounded-[6px] bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">Conectado · {meta.accountCount} contas</span> : <span className="inline-flex rounded-[6px] bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">Não conectado</span>}
+                        {meta?.connected ? <span className="inline-flex rounded-[6px] bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">Conectado · {meta.accountCount} disponíveis</span> : <span className="inline-flex rounded-[6px] bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">Não conectado</span>}
                       </td>
+                      <td className="px-3 py-3.5 text-slate-600"><strong className="font-semibold text-[#1a2820]">{assignment.assigned}</strong> de {assignment.total}</td>
                       <td className="px-4 py-3.5 text-right">
                         {canAdmin ? <div className="flex justify-end gap-2">
                           <button type="button" onClick={() => { void connectMeta(id); }} disabled={busy} className="rounded-[7px] border border-[#cdd8d1] px-3 py-1.5 text-xs font-semibold text-[#176846] hover:bg-[#f3f7f4] disabled:opacity-50">{connectingId === id ? 'Conectando...' : meta?.connected ? 'Reconectar Meta' : 'Conectar Meta'}</button>
@@ -282,12 +330,48 @@ export default function ClientsScoped() {
       </section>
 
       {canAdmin && (
+        <section className="overflow-hidden rounded-[12px] border border-[#dfe5e1] bg-white">
+          <div className="flex items-start gap-3 border-b border-[#e8ece9] px-4 py-3.5">
+            <span className="grid h-9 w-9 place-items-center rounded-[8px] bg-[#edf3ef] text-[#176846]"><Link2 size={17} /></span>
+            <div>
+              <h2 className="text-[15px] font-semibold text-[#17251c]">Contas Meta autorizadas por empresa</h2>
+              <p className="mt-0.5 text-[11px] text-slate-400">Somente contas marcadas como “No dashboard” entram na sincronização e ficam visíveis aos usuários da empresa.</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead className="bg-[#fafbfa] text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                <tr><th className="px-4 py-3">Empresa</th><th className="px-3 py-3">Business Manager</th><th className="px-3 py-3">Conta Meta Ads</th><th className="px-3 py-3">Moeda</th><th className="px-3 py-3">Conexão</th><th className="px-4 py-3 text-right">Visibilidade</th></tr>
+              </thead>
+              <tbody>
+                {accounts.map((account) => (
+                  <tr key={account.id} className="border-t border-[#eef1ef] text-[13px]">
+                    <td className="px-4 py-3.5 font-semibold text-[#1a2820]">{clientMap[account.clientId] || 'Empresa'}</td>
+                    <td className="px-3 py-3.5 text-slate-500">{account.businessName || 'BM não identificada'}</td>
+                    <td className="px-3 py-3.5"><span className="block font-medium text-slate-700">{account.name || `Conta ${account.accountId}`}</span><span className="mt-0.5 block text-[10px] text-slate-400">ID {account.accountId}</span></td>
+                    <td className="px-3 py-3.5 text-slate-500">{account.currency || '-'}</td>
+                    <td className="px-3 py-3.5">{account.isActive ? <span className="inline-flex rounded-[6px] bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">Ativa</span> : <span className="inline-flex rounded-[6px] bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">Desconectada</span>}</td>
+                    <td className="px-4 py-3.5 text-right">
+                      <button type="button" onClick={() => { void toggleAccountAssignment(account); }} disabled={assigningAccountId === account.id || (!account.isActive && !account.isAssigned)} className={`rounded-[7px] border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${account.isAssigned ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border-[#d5ddd7] bg-white text-slate-600 hover:bg-[#f7f9f7]'}`}>
+                        {assigningAccountId === account.id ? 'Salvando...' : account.isAssigned ? 'No dashboard' : 'Vincular ao dashboard'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!accounts.length && <p className="px-4 py-7 text-sm text-slate-500">Conecte a Meta em uma empresa para listar as contas disponíveis.</p>}
+        </section>
+      )}
+
+      {canAdmin && (
         <section className="rounded-[12px] border border-[#dfe5e1] bg-white">
           <div className="flex items-start gap-3 border-b border-[#e8ece9] px-4 py-3.5">
             <span className="grid h-9 w-9 place-items-center rounded-[8px] bg-[#edf3ef] text-[#176846]"><ShieldCheck size={17} /></span>
             <div>
               <h2 className="text-[15px] font-semibold text-[#17251c]">Acessos por empresa</h2>
-              <p className="mt-0.5 text-[11px] text-slate-400">Usuários CLIENT e MANAGER ficam presos ao clientId da empresa no token e no backend.</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">Usuários Cliente e Gestor ficam vinculados a uma única empresa no token e no backend.</p>
             </div>
           </div>
 
