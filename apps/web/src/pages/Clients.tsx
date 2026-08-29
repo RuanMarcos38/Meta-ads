@@ -20,6 +20,7 @@ export default function Clients() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [connectingId, setConnectingId] = useState('');
+  const [disconnectingId, setDisconnectingId] = useState('');
   const [metaConfigured, setMetaConfigured] = useState(true);
   const [metaStatuses, setMetaStatuses] = useState<Record<string, MetaClientStatus>>({});
   const [error, setError] = useState('');
@@ -129,7 +130,7 @@ export default function Clients() {
             popup.close();
             window.clearInterval(poll);
             setConnectingId('');
-            setNotice('Meta Ads conectado com sucesso.');
+            setNotice('Meta Ads conectado com sucesso. A sincronização dos dados será atualizada pelo sistema.');
             await load();
           }
         } catch {
@@ -141,6 +142,29 @@ export default function Clients() {
       setConnectingId('');
       setNotice('');
       setError('Não foi possível iniciar a conexão com a Meta. Tente novamente.');
+    }
+  }
+
+  async function disconnectMeta(clientId: string, clientName: string) {
+    if (!canCreate) return;
+
+    const confirmed = window.confirm(
+      `Desconectar a Meta Ads de ${clientName}? O histórico já sincronizado será preservado.`,
+    );
+    if (!confirmed) return;
+
+    setDisconnectingId(clientId);
+    setError('');
+    setNotice('');
+
+    try {
+      await api.post('/meta/disconnect', { clientId });
+      setNotice('Meta Ads desconectado com sucesso. O histórico sincronizado foi preservado.');
+      await load();
+    } catch {
+      setError('Não foi possível desconectar a Meta Ads. Tente novamente.');
+    } finally {
+      setDisconnectingId('');
     }
   }
 
@@ -189,7 +213,7 @@ export default function Clients() {
           <p className="px-4 py-6 text-sm text-slate-500">Carregando clientes...</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-sm">
+            <table className="w-full min-w-[920px] text-sm">
               <thead className="border-b border-brand-border bg-[#fafbfa] text-left text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
                 <tr>
                   <th className="px-4 py-3">Nome</th>
@@ -203,8 +227,11 @@ export default function Clients() {
               <tbody>
                 {rows.map((client) => {
                   const meta = metaStatuses[String(client.id)];
+                  const clientId = String(client.id);
+                  const busy = connectingId === clientId || disconnectingId === clientId;
+
                   return (
-                    <tr key={String(client.id)} className="border-b border-[#edf0ed] last:border-b-0 hover:bg-[#fbfcfb]">
+                    <tr key={clientId} className="border-b border-[#edf0ed] last:border-b-0 hover:bg-[#fbfcfb]">
                       <td className="px-4 py-3.5 font-semibold text-[#1d2b23]">{client.name}</td>
                       <td className="px-3 text-slate-600">{client.companyName || '-'}</td>
                       <td className="px-3 text-slate-600">{client.segment || '-'}</td>
@@ -220,14 +247,27 @@ export default function Clients() {
                       </td>
                       <td className="px-4 text-right">
                         {canCreate ? (
-                          <button
-                            type="button"
-                            onClick={() => { void connectMeta(String(client.id)); }}
-                            disabled={!metaConfigured || connectingId === String(client.id)}
-                            className="rounded-[8px] border border-[#cad7ce] bg-white px-3 py-2 text-xs font-bold text-brand-blue transition-colors hover:bg-[#f0f5f1] disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {connectingId === String(client.id) ? 'Conectando...' : meta?.connected ? 'Reconectar Meta' : 'Conectar Meta'}
-                          </button>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { void connectMeta(clientId); }}
+                              disabled={!metaConfigured || busy}
+                              className="rounded-[8px] border border-[#cad7ce] bg-white px-3 py-2 text-xs font-bold text-brand-blue transition-colors hover:bg-[#f0f5f1] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {connectingId === clientId ? 'Conectando...' : meta?.connected ? 'Reconectar Meta' : 'Conectar Meta'}
+                            </button>
+
+                            {meta?.connected && (
+                              <button
+                                type="button"
+                                onClick={() => { void disconnectMeta(clientId, String(client.name || 'este cliente')); }}
+                                disabled={busy}
+                                className="rounded-[8px] border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {disconnectingId === clientId ? 'Desconectando...' : 'Desconectar'}
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-xs text-slate-400">Somente administrador</span>
                         )}
