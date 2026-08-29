@@ -22,8 +22,12 @@ function metaConfigurationReady() {
   return Boolean(env.meta.appId && env.meta.appSecret && env.meta.redirectUri);
 }
 
+function isTenantUser(user: AuthUser) {
+  return user.role === 'CLIENT' || user.role === 'MANAGER';
+}
+
 function restrictedAccessWithoutClient(user: AuthUser, clientId?: string) {
-  return (user.role === 'CLIENT' || user.role === 'MANAGER') && !clientId;
+  return isTenantUser(user) && !clientId;
 }
 
 export async function registerOperationalRoutes(app: FastifyInstance) {
@@ -93,7 +97,11 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
         orderBy: { updatedAt: 'desc' },
       }),
       prisma.metaAdAccount.findMany({
-        where: { ...where, isActive: true },
+        where: {
+          ...where,
+          isActive: true,
+          ...(isTenantUser(user) ? { isAssigned: true } : {}),
+        },
         select: {
           id: true,
           clientId: true,
@@ -102,7 +110,10 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
           currency: true,
           timezone: true,
           accountStatus: true,
+          businessId: true,
+          businessName: true,
           isActive: true,
+          isAssigned: true,
           updatedAt: true,
         },
         orderBy: { name: 'asc' },
@@ -175,13 +186,17 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
         id: body.data.adAccountId,
         organizationId: user.organizationId!,
         isActive: true,
+        isAssigned: true,
         ...(restrictedClientId ? { clientId: restrictedClientId } : {}),
       },
       include: { connection: true },
     });
 
     if (!account || account.connection.status !== 'active') {
-      return reply.code(404).send(fail('META_ACCOUNT_NOT_FOUND', 'Conta de anúncio ativa não encontrada para este acesso.'));
+      return reply.code(404).send(fail(
+        'META_ACCOUNT_NOT_FOUND',
+        'Conta de anúncio ativa e vinculada à empresa não encontrada para este acesso.',
+      ));
     }
 
     try {
@@ -231,7 +246,7 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
           action: 'CREATE_META_CAMPAIGN',
           entity: 'Campaign',
           entityId: campaign.id,
-          metadataJson: { metaCampaignId: created.id, adAccountId: account.accountId },
+          metadataJson: { metaCampaignId: created.id, adAccountId: account.accountId, clientId: account.clientId },
         },
       });
 
@@ -267,8 +282,11 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
       include: { adAccount: { include: { connection: true } } },
     });
 
-    if (!campaign || campaign.adAccount.connection.status !== 'active') {
-      return reply.code(404).send(fail('CAMPAIGN_NOT_FOUND', 'Campanha não encontrada para este acesso.'));
+    if (!campaign
+      || !campaign.adAccount.isActive
+      || !campaign.adAccount.isAssigned
+      || campaign.adAccount.connection.status !== 'active') {
+      return reply.code(404).send(fail('CAMPAIGN_NOT_FOUND', 'Campanha não encontrada no escopo autorizado desta empresa.'));
     }
 
     try {
@@ -288,7 +306,7 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
           action: 'UPDATE_META_CAMPAIGN_STATUS',
           entity: 'Campaign',
           entityId: campaign.id,
-          metadataJson: { status: body.data.status, metaCampaignId: campaign.metaCampaignId },
+          metadataJson: { status: body.data.status, metaCampaignId: campaign.metaCampaignId, clientId: campaign.clientId },
         },
       });
 
