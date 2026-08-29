@@ -11,9 +11,9 @@ api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
 
-  // A sincronização Meta percorre várias contas e pode levar cerca de 1 minuto.
-  // Mantemos 15 s para as demais rotas e ampliamos somente este endpoint.
-  if (config.url?.includes('/dashboard/sync')) {
+  // Sincronizações reais podem percorrer várias contas Meta e levar cerca de 1 minuto.
+  // O timeout maior fica restrito aos endpoints de sync; o restante mantém resposta rápida.
+  if (config.url?.includes('/sync')) {
     config.timeout = 120000;
   }
 
