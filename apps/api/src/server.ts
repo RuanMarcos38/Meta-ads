@@ -4,7 +4,7 @@ import { startMetaSyncScheduler } from './modules/meta/syncScheduler.js';
 
 async function main() {
   const app = await buildApp();
-  let stopScheduler = () => undefined;
+  let stopScheduler: () => void = () => {};
 
   app.addHook('onClose', async () => {
     stopScheduler();
