@@ -7,6 +7,7 @@ import { env } from './config/env.js';
 import { registerRoutes } from './routes.js';
 import { registerOperationalRoutes } from './operationalRoutes.js';
 import { registerDatabaseDiagnostics } from './databaseDiagnostics.js';
+import { registerMetaDiagnostics } from './metaDiagnostics.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -19,5 +20,6 @@ export async function buildApp() {
   await registerDatabaseDiagnostics(app);
   await registerRoutes(app);
   await registerOperationalRoutes(app);
+  await registerMetaDiagnostics(app);
   return app;
 }
