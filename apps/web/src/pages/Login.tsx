@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import { BarChart3 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, apiBaseURL } from '../api';
 import { useAuth } from '../store';
 
-const BUILD_ID = '2026.08.01.1';
+const BUILD_ID = '2026.08.29.1';
 
 type ApiErrorPayload = {
   error?: {
@@ -108,58 +109,67 @@ export default function Login() {
         : 'API indisponível';
 
   const statusClass = apiState === 'online' && adminReady !== false
-    ? 'text-green-400'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
     : apiState === 'checking'
-      ? 'text-gray-500'
-      : 'text-amber-400';
+      ? 'border-slate-200 bg-slate-50 text-slate-500'
+      : 'border-amber-200 bg-amber-50 text-amber-700';
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-8">
-      <form
-        onSubmit={submit}
-        data-build-id={BUILD_ID}
-        className="w-full max-w-sm bg-brand-card border border-brand-border rounded-2xl p-8 shadow-2xl"
-      >
-        <h1 className="text-2xl font-bold text-center mb-1 bg-gradient-to-r from-brand-blue to-brand-purple bg-clip-text text-transparent">Gestão Ads</h1>
-        <p className="text-center text-sm text-gray-400 mb-6">R2R Marketing Digital</p>
-
-        <div className={`mb-4 rounded-lg border border-brand-border bg-brand-bg/60 px-3 py-2 text-xs ${statusClass}`}>
-          {statusText}
-        </div>
-
-        <label className="text-sm text-gray-300" htmlFor="email">E-mail</label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="email"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          className="w-full mb-4 mt-1 px-3 py-2 rounded-lg bg-brand-bg border border-brand-border outline-none focus:border-brand-blue"
-        />
-
-        <label className="text-sm text-gray-300" htmlFor="password">Senha</label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className="w-full mb-4 mt-1 px-3 py-2 rounded-lg bg-brand-bg border border-brand-border outline-none focus:border-brand-blue"
-        />
-
-        {error && <p className="text-red-400 text-sm mb-3" role="alert">{error}</p>}
-        <button
-          disabled={loading || apiState === 'offline' || apiState === 'database-error'}
-          className="w-full py-2.5 rounded-lg bg-gradient-to-r from-brand-blue to-brand-purple font-semibold hover:opacity-90 disabled:opacity-50"
+    <div className="min-h-screen bg-[#f4f6f4] px-4 py-8">
+      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md items-center justify-center">
+        <form
+          onSubmit={submit}
+          data-build-id={BUILD_ID}
+          className="w-full rounded-[14px] border border-[#dce3dd] bg-white p-7 shadow-[0_16px_38px_rgba(20,48,34,0.09)] sm:p-8"
         >
-          {loading ? 'Entrando...' : 'Entrar'}
-        </button>
-        <p className="mt-4 text-center text-[10px] text-gray-600 break-all">
-          v{BUILD_ID} · {apiBaseURL}
-        </p>
-      </form>
+          <div className="mb-7 flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-[10px] bg-brand-blue text-white shadow-sm">
+              <BarChart3 size={21} strokeWidth={1.9} />
+            </span>
+            <div>
+              <h1 className="text-xl font-extrabold tracking-[-0.02em] text-[#18231d]">Gestão Ads</h1>
+              <p className="mt-0.5 text-xs font-medium text-slate-500">R2R Marketing Digital</p>
+            </div>
+          </div>
+
+          <div className={`mb-5 rounded-[9px] border px-3.5 py-2.5 text-xs font-medium ${statusClass}`}>
+            {statusText}
+          </div>
+
+          <label className="text-xs font-semibold text-slate-600" htmlFor="email">E-mail</label>
+          <input
+            id="email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            className="mb-4 mt-1.5 h-11 w-full rounded-[9px] border border-brand-border bg-white px-3.5 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-[#91b19f]"
+          />
+
+          <label className="text-xs font-semibold text-slate-600" htmlFor="password">Senha</label>
+          <input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            className="mb-4 mt-1.5 h-11 w-full rounded-[9px] border border-brand-border bg-white px-3.5 text-sm text-slate-800 outline-none transition-colors focus:border-[#91b19f]"
+          />
+
+          {error && <p className="mb-3 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p>}
+          <button
+            disabled={loading || apiState === 'offline' || apiState === 'database-error'}
+            className="h-11 w-full rounded-[9px] bg-brand-blue text-sm font-bold text-white shadow-sm transition-colors hover:bg-brand-purple disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? 'Entrando...' : 'Entrar'}
+          </button>
+          <p className="mt-5 break-all text-center text-[10px] text-slate-400">
+            v{BUILD_ID} · {apiBaseURL}
+          </p>
+        </form>
+      </div>
     </div>
   );
 }
