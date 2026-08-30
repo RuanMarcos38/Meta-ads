@@ -56,6 +56,29 @@ async function postForm<T>(url: string, accessToken: string, values: Record<stri
   return response.data as T;
 }
 
+function formatUtcDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function splitDateRange(since: string, until: string, maxDays = 180) {
+  const start = new Date(`${since}T00:00:00.000Z`);
+  const end = new Date(`${until}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [{ since, until }];
+
+  const ranges: Array<{ since: string; until: string }> = [];
+  let cursor = start;
+  while (cursor <= end) {
+    const chunkEnd = new Date(cursor);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + maxDays - 1);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+    ranges.push({ since: formatUtcDate(cursor), until: formatUtcDate(chunkEnd) });
+    const next = new Date(chunkEnd);
+    next.setUTCDate(next.getUTCDate() + 1);
+    cursor = next;
+  }
+  return ranges;
+}
+
 export type MetaCampaignObjective =
   | 'OUTCOME_AWARENESS'
   | 'OUTCOME_TRAFFIC'
@@ -276,20 +299,29 @@ export class MetaAdsService {
     return postForm<{ success?: boolean }>(`${BASE()}/${campaignId}`, this.accessToken, { status });
   }
 
-  insights(actId: string, since: string, until: string, level: MetaInsightLevel = 'campaign') {
+  async insights(actId: string, since: string, until: string, level: MetaInsightLevel = 'campaign') {
     const hierarchyFields = level === 'ad'
       ? 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name'
       : level === 'adset'
         ? 'campaign_id,campaign_name,adset_id,adset_name'
         : 'campaign_id,campaign_name';
 
-    return getPaged(`${BASE()}/${actId}/insights`, {
-      access_token: this.accessToken,
-      level,
-      time_range: JSON.stringify({ since, until }),
-      time_increment: '1',
-      fields: `${hierarchyFields},spend,impressions,reach,frequency,cpm,ctr,cpc,clicks,inline_link_clicks,actions,action_values,cost_per_action_type,date_start`,
-      limit: '500',
-    });
+    const fields = `${hierarchyFields},spend,impressions,reach,frequency,cpm,ctr,cpc,clicks,inline_link_clicks,actions,action_values,cost_per_action_type,date_start`;
+    const rows: any[] = [];
+
+    // Períodos extensos são divididos em blocos menores para reduzir timeout/rate errors
+    // e permitir importação do histórico completo disponível no Gerenciador de Anúncios.
+    for (const range of splitDateRange(since, until, 180)) {
+      const chunk = await getPaged(`${BASE()}/${actId}/insights`, {
+        access_token: this.accessToken,
+        level,
+        time_range: JSON.stringify(range),
+        time_increment: '1',
+        fields,
+        limit: '500',
+      });
+      rows.push(...chunk);
+    }
+    return rows;
   }
 }
