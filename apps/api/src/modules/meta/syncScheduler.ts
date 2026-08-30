@@ -31,15 +31,28 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
           id: true,
           organizationId: true,
           clientId: true,
+          businessId: true,
           connection: { select: { status: true } },
         },
       });
 
-      const scopes = new Map<string, { organizationId: string; clientId: string; accountIds: string[] }>();
+      const scopes = new Map<string, {
+        organizationId: string;
+        clientId: string;
+        businessId?: string;
+        accountIds: string[];
+      }>();
+
       for (const account of accounts) {
         if (account.connection.status !== 'active') continue;
-        const key = `${account.organizationId}:${account.clientId}`;
-        const current = scopes.get(key) ?? { organizationId: account.organizationId, clientId: account.clientId, accountIds: [] };
+        const businessKey = account.businessId || '__SEM_BM__';
+        const key = `${account.organizationId}:${account.clientId}:${businessKey}`;
+        const current = scopes.get(key) ?? {
+          organizationId: account.organizationId,
+          clientId: account.clientId,
+          businessId: account.businessId || undefined,
+          accountIds: [],
+        };
         current.accountIds.push(account.id);
         scopes.set(key, current);
       }
@@ -61,6 +74,7 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
               where: {
                 organizationId: scope.organizationId,
                 clientId: scope.clientId,
+                businessId: scope.businessId ?? null,
                 type: 'history',
                 status: 'success',
               },
@@ -77,16 +91,27 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
               {
                 organizationId: scope.organizationId,
                 clientId: scope.clientId,
+                businessId: scope.businessId,
                 reason: hasAccountWithoutMetrics ? 'new_account' : 'history_not_completed',
               },
-              'Importação histórica completa obrigatória iniciada para empresa/BM.',
+              'Importação histórica completa obrigatória iniciada para BM.',
             );
-            await runSync(scope.organizationId, scope.clientId, undefined, 'history', { fullHistory: true });
+            await runSync(scope.organizationId, scope.clientId, undefined, 'history', {
+              fullHistory: true,
+              businessId: scope.businessId,
+            });
           } else {
-            await runSync(scope.organizationId, scope.clientId, undefined, 'automatic');
+            await runSync(scope.organizationId, scope.clientId, undefined, 'automatic', {
+              businessId: scope.businessId,
+            });
           }
         } catch (error) {
-          logger.error({ err: error, organizationId: scope.organizationId, clientId: scope.clientId }, 'Falha na sincronização automática Meta.');
+          logger.error({
+            err: error,
+            organizationId: scope.organizationId,
+            clientId: scope.clientId,
+            businessId: scope.businessId,
+          }, 'Falha na sincronização automática de uma BM. As demais BMs continuam independentes.');
         }
       }
     } catch (error) {
@@ -99,7 +124,7 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
   const initialTimer = setTimeout(() => { void tick(); }, Math.min(30_000, intervalMs));
   const intervalTimer = setInterval(() => { void tick(); }, intervalMs);
 
-  logger.info(`Sincronização automática Meta configurada para cada ${intervalMinutes} minuto(s), com backfill histórico completo obrigatório por empresa e em novas contas.`);
+  logger.info(`Sincronização automática Meta configurada a cada ${intervalMinutes} minuto(s), isolada por empresa e BM.`);
 
   return () => {
     stopped = true;
