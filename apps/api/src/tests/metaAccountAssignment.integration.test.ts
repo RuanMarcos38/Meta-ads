@@ -72,6 +72,25 @@ suite('Meta account assignment compatibility', () => {
     expect(response.json().data.version).toBe('2026.08.29.1');
   });
 
+  it('libera PATCH e POST no preflight CORS da autorização Meta', async () => {
+    const response = await app.inject({
+      method: 'OPTIONS',
+      url: `/meta/client-accounts/${accountId}/assignment`,
+      headers: {
+        origin: 'https://gestao.r2rmarketingdigital.com.br',
+        'access-control-request-method': 'PATCH',
+        'access-control-request-headers': 'authorization,content-type',
+      },
+    });
+
+    expect([200, 204]).toContain(response.statusCode);
+    expect(response.headers['access-control-allow-origin']).toBe('https://gestao.r2rmarketingdigital.com.br');
+    const methods = String(response.headers['access-control-allow-methods'] || '');
+    expect(methods).toContain('PATCH');
+    expect(methods).toContain('POST');
+    expect(methods).toContain('OPTIONS');
+  });
+
   it('autoriza e remove uma conta Meta por POST sem depender da consulta de BM', async () => {
     const headers = { authorization: `Bearer ${token}` };
 
