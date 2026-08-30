@@ -220,13 +220,6 @@ textarea:focus-visible {
   }
 }
 
-/* Desktop: scroll interno apenas quando há espaço vertical suficiente. */
-@media (min-width: 1024px) {
-  body {
-    overflow: hidden;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
