@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from './shared/prisma.js';
 import { requireAuth, type AuthUser } from './shared/auth.js';
 import { fail, ok } from './shared/response.js';
+import { runSync } from './modules/meta/syncService.js';
 
 const paramsSchema = z.object({ id: z.string().uuid() });
 const assignmentSchema = z.object({ isAssigned: z.boolean() });
@@ -10,7 +11,7 @@ const assignmentSchema = z.object({ isAssigned: z.boolean() });
 export async function registerMetaAccountAssignmentRoutes(app: FastifyInstance) {
   app.get('/meta/account-assignment-capability', async () => ok({
     enabled: true,
-    version: '2026.08.30.1',
+    version: '2026.08.30.2',
     methods: ['POST'],
   }));
 
@@ -120,10 +121,34 @@ export async function registerMetaAccountAssignmentRoutes(app: FastifyInstance) 
       req.log.warn({ auditError, accountId: updated.id }, 'Falha não bloqueante ao registrar auditoria da conta Meta.');
     }
 
+    // Na primeira autorização, inicia o backfill completo em segundo plano.
+    // A resposta do botão não fica bloqueada; o scheduler também recupera a importação
+    // caso o processo seja interrompido antes de concluir.
+    if (body.data.isAssigned && !account.isAssigned) {
+      const existingHistory = await prisma.syncJob.findFirst({
+        where: {
+          organizationId: user.organizationId!,
+          clientId: account.clientId,
+          type: 'history',
+          status: { in: ['running', 'success'] },
+        },
+        select: { id: true },
+      });
+
+      if (!existingHistory) {
+        setTimeout(() => {
+          void runSync(user.organizationId!, account.clientId, user.id, 'history', { fullHistory: true })
+            .catch((historyError) => {
+              req.log.error({ historyError, clientId: account.clientId, accountId: account.id }, 'Falha no backfill histórico iniciado pela autorização Meta.');
+            });
+        }, 0);
+      }
+    }
+
     return ok(
-      updated,
+      { ...updated, historySyncStarted: Boolean(body.data.isAssigned && !account.isAssigned) },
       body.data.isAssigned
-        ? 'Conta Meta autorizada para esta empresa.'
+        ? 'Conta Meta autorizada. O histórico completo será sincronizado automaticamente.'
         : 'Conta Meta removida do dashboard desta empresa.',
     );
   });
