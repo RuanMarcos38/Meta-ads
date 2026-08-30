@@ -132,6 +132,7 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
     }
   });
 
+  // Rota legada mantida por compatibilidade. Ela não reclassifica mais contas Meta manualmente.
   app.patch('/clients/:id/business-access', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
     const admin = req.user as AuthUser;
     const params = z.object({ id: z.string().uuid() }).safeParse(req.params);
@@ -173,13 +174,14 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
         data: { businessId },
       });
 
-      const accounts = await tx.metaAdAccount.updateMany({
+      const unassigned = await tx.metaAdAccount.updateMany({
         where: {
           organizationId: admin.organizationId!,
           clientId: client.id,
           isAssigned: true,
+          NOT: { businessId },
         },
-        data: { businessId, businessName },
+        data: { isAssigned: false },
       });
 
       await tx.auditLog.create({
@@ -194,7 +196,7 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
             businessName,
             adminEmail,
             usersUpdated: users.count,
-            assignedAccountsUpdated: accounts.count,
+            accountsUnassignedForSafety: unassigned.count,
           },
         },
       });
@@ -202,7 +204,7 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
       return updatedClient;
     });
 
-    return ok(result, 'Business Manager vinculada à empresa. Usuários e contas autorizadas foram atualizados.');
+    return ok(result, 'Business Manager vinculada. Contas de outra BM foram removidas do escopo por segurança.');
   });
 
   app.patch('/meta/client-accounts/:id/business-assignment', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
@@ -222,16 +224,22 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
     if (body.data.isAssigned && (!account.client.metaBusinessId || !account.client.metaBusinessName)) {
       return reply.code(409).send(fail('BM_REQUIRED', 'Vincule primeiro a Business Manager da empresa.'));
     }
+    if (body.data.isAssigned && !account.businessId) {
+      return reply.code(409).send(fail(
+        'META_ACCOUNT_BM_UNKNOWN',
+        'Atualize a lista de BMs para confirmar a qual Business Manager esta conta pertence.',
+      ));
+    }
+    if (body.data.isAssigned && account.businessId !== account.client.metaBusinessId) {
+      return reply.code(409).send(fail(
+        'META_ACCOUNT_WRONG_BM',
+        'Esta conta pertence a outra Business Manager e não pode ser autorizada para esta empresa.',
+      ));
+    }
 
     const updated = await prisma.metaAdAccount.update({
       where: { id: account.id },
-      data: body.data.isAssigned
-        ? {
-            isAssigned: true,
-            businessId: account.client.metaBusinessId,
-            businessName: account.client.metaBusinessName,
-          }
-        : { isAssigned: false },
+      data: { isAssigned: body.data.isAssigned },
       select: {
         id: true,
         clientId: true,
@@ -261,7 +269,7 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
     });
 
     return ok(updated, body.data.isAssigned
-      ? 'Conta Meta vinculada à BM desta empresa.'
+      ? 'Conta Meta autorizada para a BM desta empresa.'
       : 'Conta Meta removida do dashboard desta empresa.');
   });
 
