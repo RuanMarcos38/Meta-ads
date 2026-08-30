@@ -31,6 +31,29 @@ jobs:
             "https://api.github.com/repos/${REPOSITORY}/actions/workflows/deploy.yml/runs?branch=main&event=push&per_page=5")"
           echo "$response" | jq -r '.workflow_runs[] | "deploy run=\(.id) status=\(.status) conclusion=\(.conclusion) sha=\(.head_sha) created=\(.created_at) url=\(.html_url)"'
 
+      - name: Check Meta assignment CORS preflight
+        env:
+          API_URL: https://api-gestao.r2rmarketingdigital.com.br
+          FRONTEND_ORIGIN: https://gestao.r2rmarketingdigital.com.br
+          TEST_ACCOUNT_UUID: e5d248a9-5dc1-486f-b1c8-0158c0f4a1d5
+        run: |
+          set -euo pipefail
+          headers="$(mktemp)"
+          status="$(curl -sS --connect-timeout 10 --max-time 20 -o /dev/null -D "$headers" -w '%{http_code}' \
+            -X OPTIONS \
+            -H "Origin: ${FRONTEND_ORIGIN}" \
+            -H "Access-Control-Request-Method: PATCH" \
+            -H "Access-Control-Request-Headers: authorization,content-type" \
+            "${API_URL}/meta/client-accounts/${TEST_ACCOUNT_UUID}/assignment")"
+          echo "Preflight HTTP ${status}"
+          tr -d '\r' < "$headers" | grep -i '^access-control-' || true
+          origin="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="access-control-allow-origin" {print $2}' | tail -1)"
+          methods="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="access-control-allow-methods" {print $2}' | tail -1)"
+          test "$origin" = "$FRONTEND_ORIGIN"
+          printf '%s' "$methods" | grep -q 'PATCH'
+          printf '%s' "$methods" | grep -q 'POST'
+          echo "Preflight da autorização Meta aceita PATCH e POST."
+
       - name: Check Meta account authorization backend
         env:
           API_URL: https://api-gestao.r2rmarketingdigital.com.br
