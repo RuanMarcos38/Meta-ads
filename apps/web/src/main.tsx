@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import Dashboard from './pages/DashboardScoped';
 import Campaigns from './pages/CampaignsScoped';
 import Clients from './pages/ClientsResilient';
+import Support from './pages/Support';
 import { useAuth } from './store';
 
 function Private({ children }: { children: React.ReactNode }) {
@@ -24,6 +25,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route index element={<Dashboard />} />
           <Route path="campanhas" element={<Campaigns />} />
           <Route path="clientes" element={<Clients />} />
+          <Route path="atendimento" element={<Support />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
