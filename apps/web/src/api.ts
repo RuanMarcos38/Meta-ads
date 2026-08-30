@@ -17,6 +17,16 @@ api.interceptors.request.use((config) => {
     config.timeout = 120000;
   }
 
+  // Compatibilidade de produção: alguns proxies/reverse proxies podem rejeitar PATCH
+  // mesmo quando a API aceita o endpoint. A autorização de contas possui uma rota POST
+  // equivalente e idempotente no backend, então convertemos somente este caso específico.
+  if (
+    config.method?.toLowerCase() === 'patch'
+    && /^\/meta\/client-accounts\/[^/]+\/assignment$/.test(config.url || '')
+  ) {
+    config.method = 'post';
+  }
+
   return config;
 });
 
