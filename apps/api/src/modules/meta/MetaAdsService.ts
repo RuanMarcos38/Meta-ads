@@ -89,6 +89,7 @@ export type MetaCampaignObjective =
 
 export type MetaSpecialAdCategory = 'HOUSING' | 'EMPLOYMENT' | 'CREDIT' | 'ISSUES_ELECTIONS_POLITICS';
 export type MetaInsightLevel = 'campaign' | 'adset' | 'ad';
+export type MetaBreakdown = 'age' | 'gender' | 'region' | 'publisher_platform' | 'device_platform' | 'platform_position';
 
 export type MetaBusinessRef = {
   businessId: string;
@@ -309,12 +310,40 @@ export class MetaAdsService {
     const fields = `${hierarchyFields},spend,impressions,reach,frequency,cpm,ctr,cpc,clicks,inline_link_clicks,actions,action_values,cost_per_action_type,date_start`;
     const rows: any[] = [];
 
-    // Períodos extensos são divididos em blocos menores para reduzir timeout/rate errors
-    // e permitir importação do histórico completo disponível no Gerenciador de Anúncios.
     for (const range of splitDateRange(since, until, 180)) {
       const chunk = await getPaged(`${BASE()}/${actId}/insights`, {
         access_token: this.accessToken,
         level,
+        time_range: JSON.stringify(range),
+        time_increment: '1',
+        fields,
+        limit: '500',
+      });
+      rows.push(...chunk);
+    }
+    return rows;
+  }
+
+  async breakdownInsights(
+    actId: string,
+    since: string,
+    until: string,
+    breakdown: MetaBreakdown,
+    level: MetaInsightLevel = 'campaign',
+  ) {
+    const hierarchyFields = level === 'ad'
+      ? 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name'
+      : level === 'adset'
+        ? 'campaign_id,campaign_name,adset_id,adset_name'
+        : 'campaign_id,campaign_name';
+    const fields = `${hierarchyFields},spend,impressions,reach,clicks,actions,action_values,date_start`;
+    const rows: any[] = [];
+
+    for (const range of splitDateRange(since, until, 90)) {
+      const chunk = await getPaged(`${BASE()}/${actId}/insights`, {
+        access_token: this.accessToken,
+        level,
+        breakdowns: breakdown,
         time_range: JSON.stringify(range),
         time_increment: '1',
         fields,
