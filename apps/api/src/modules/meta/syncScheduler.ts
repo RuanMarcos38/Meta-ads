@@ -26,24 +26,45 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
 
     try {
       const accounts = await prisma.metaAdAccount.findMany({
-        where: { isActive: true },
+        where: { isActive: true, isAssigned: true },
         select: {
+          id: true,
           organizationId: true,
           clientId: true,
           connection: { select: { status: true } },
         },
       });
 
-      const scopes = new Map<string, { organizationId: string; clientId: string }>();
+      const scopes = new Map<string, { organizationId: string; clientId: string; accountIds: string[] }>();
       for (const account of accounts) {
         if (account.connection.status !== 'active') continue;
         const key = `${account.organizationId}:${account.clientId}`;
-        scopes.set(key, { organizationId: account.organizationId, clientId: account.clientId });
+        const current = scopes.get(key) ?? { organizationId: account.organizationId, clientId: account.clientId, accountIds: [] };
+        current.accountIds.push(account.id);
+        scopes.set(key, current);
       }
 
       for (const scope of scopes.values()) {
         try {
-          await runSync(scope.organizationId, scope.clientId, undefined, 'automatic');
+          const importedAccounts = await prisma.insightDaily.findMany({
+            where: {
+              organizationId: scope.organizationId,
+              clientId: scope.clientId,
+              level: 'campaign',
+              adAccountId: { in: scope.accountIds },
+            },
+            distinct: ['adAccountId'],
+            select: { adAccountId: true },
+          });
+          const importedIds = new Set(importedAccounts.map((item) => item.adAccountId));
+          const needsHistory = scope.accountIds.some((id) => !importedIds.has(id));
+
+          if (needsHistory) {
+            logger.info({ organizationId: scope.organizationId, clientId: scope.clientId }, 'Nova conta/BM detectada: iniciando importação histórica.');
+            await runSync(scope.organizationId, scope.clientId, undefined, 'history', { fullHistory: true });
+          } else {
+            await runSync(scope.organizationId, scope.clientId, undefined, 'automatic');
+          }
         } catch (error) {
           logger.error({ err: error, organizationId: scope.organizationId, clientId: scope.clientId }, 'Falha na sincronização automática Meta.');
         }
@@ -58,7 +79,7 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
   const initialTimer = setTimeout(() => { void tick(); }, Math.min(30_000, intervalMs));
   const intervalTimer = setInterval(() => { void tick(); }, intervalMs);
 
-  logger.info(`Sincronização automática Meta configurada para cada ${intervalMinutes} minuto(s).`);
+  logger.info(`Sincronização automática Meta configurada para cada ${intervalMinutes} minuto(s), com backfill histórico em novas contas.`);
 
   return () => {
     stopped = true;
