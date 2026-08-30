@@ -42,15 +42,16 @@ enum SupportMessageKind {
 }
 
 model Organization {
-  id        String   @id @default(uuid())
-  name      String
-  document  String?
-  email     String?
-  phone     String?
-  users     User[]
-  clients   Client[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String            @id @default(uuid())
+  name             String
+  document         String?
+  email            String?
+  phone            String?
+  users            User[]
+  clients          Client[]
+  businessManagers BusinessManager[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 }
 
 model User {
@@ -76,16 +77,16 @@ model User {
 }
 
 model Client {
-  id                  String       @id @default(uuid())
+  id                  String            @id @default(uuid())
   organizationId      String
-  organization        Organization @relation(fields: [organizationId], references: [id])
+  organization        Organization      @relation(fields: [organizationId], references: [id])
   name                String
   companyName         String?
   document            String?
   email               String?
-  phone               String?
+  phone                String?
   segment             String?
-  status              String       @default("active")
+  status              String            @default("active")
   notes               String?
   primaryResultAction String?
   metaBusinessId      String?
@@ -93,11 +94,36 @@ model Client {
   metaAdminEmail      String?
   users               User[]
   adAccounts          MetaAdAccount[]
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  businessManagers    BusinessManager[]
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
   @@index([organizationId])
   @@index([organizationId, metaBusinessId])
+}
+
+model BusinessManager {
+  id                 String          @id @default(uuid())
+  organizationId     String
+  organization       Organization    @relation(fields: [organizationId], references: [id])
+  clientId           String
+  client             Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  metaBusinessId     String
+  name               String
+  adminEmail         String?
+  status             String          @default("active")
+  connectionStatus   String          @default("unknown")
+  tokenStatus        String          @default("unknown")
+  lastSyncAt         DateTime?
+  lastHistorySyncAt  DateTime?
+  lastError          String?
+  adAccounts         MetaAdAccount[]
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@unique([organizationId, clientId, metaBusinessId])
+  @@index([organizationId, clientId, status])
+  @@index([metaBusinessId])
 }
 
 model MetaConnection {
@@ -117,28 +143,31 @@ model MetaConnection {
 }
 
 model MetaAdAccount {
-  id             String         @id @default(uuid())
-  organizationId String
-  clientId       String
-  client         Client         @relation(fields: [clientId], references: [id])
-  connectionId   String
-  connection     MetaConnection @relation(fields: [connectionId], references: [id])
-  accountId      String
-  name           String?
-  currency       String?
-  timezone       String?
-  accountStatus  Int?
-  businessId     String?
-  businessName   String?
-  isActive       Boolean        @default(true)
-  isAssigned     Boolean        @default(false)
-  campaigns      Campaign[]
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id                String           @id @default(uuid())
+  organizationId    String
+  clientId          String
+  client            Client           @relation(fields: [clientId], references: [id])
+  connectionId      String
+  connection        MetaConnection   @relation(fields: [connectionId], references: [id])
+  businessManagerId String?
+  businessManager   BusinessManager? @relation(fields: [businessManagerId], references: [id], onDelete: SetNull)
+  accountId         String
+  name              String?
+  currency          String?
+  timezone          String?
+  accountStatus     Int?
+  businessId        String?
+  businessName      String?
+  isActive          Boolean          @default(true)
+  isAssigned        Boolean          @default(false)
+  campaigns         Campaign[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@index([organizationId, clientId])
   @@index([organizationId, clientId, businessId])
   @@index([organizationId, clientId, isAssigned])
+  @@index([businessManagerId])
 }
 
 model Campaign {
@@ -235,10 +264,39 @@ model InsightDaily {
   @@index([organizationId, date])
 }
 
+model InsightBreakdownDaily {
+  id             String       @id @default(uuid())
+  organizationId String
+  clientId       String
+  adAccountId    String
+  campaignId     String       @default("")
+  adSetId         String       @default("")
+  adId            String       @default("")
+  level           InsightLevel @default(campaign)
+  date            DateTime
+  breakdownType   String
+  breakdownValue  String
+  spend           Decimal      @default(0)
+  impressions     Int          @default(0)
+  reach           Int          @default(0)
+  clicks          Int          @default(0)
+  leads           Int          @default(0)
+  conversations   Int          @default(0)
+  purchases       Int          @default(0)
+  revenue         Decimal      @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([level, date, adAccountId, campaignId, adSetId, adId, breakdownType, breakdownValue])
+  @@index([organizationId, clientId, date])
+  @@index([adAccountId, breakdownType, date])
+}
+
 model SyncJob {
   id               String   @id @default(uuid())
   organizationId   String
   clientId          String?
+  businessId        String?
   adAccountId       String?
   type              String
   status            String   @default("running")
@@ -249,47 +307,60 @@ model SyncJob {
   createdBy         String?
 
   @@index([organizationId, startedAt])
+  @@index([organizationId, clientId, businessId, startedAt])
 }
 
 model Report {
   id             String   @id @default(uuid())
   organizationId String
   clientId       String
+  businessId     String?
+  adAccountId    String?
   title          String
+  format         String   @default("pdf")
+  status         String   @default("ready")
   periodStart    DateTime
   periodEnd      DateTime
   fileUrl        String?
   summaryText    String?
+  metadataJson   Json?
   createdBy      String?
   createdAt      DateTime @default(now())
+
+  @@index([organizationId, clientId, createdAt])
 }
 
 model Alert {
   id             String   @id @default(uuid())
   organizationId String
   clientId       String?
+  businessId     String?
+  adAccountId    String?
   type           String
   severity       String   @default("info")
   title          String
   message        String
   isRead         Boolean  @default(false)
   createdAt      DateTime @default(now())
+
+  @@index([organizationId, clientId, createdAt])
+  @@index([organizationId, isRead, createdAt])
 }
 
 model SupportConversation {
-  id            String                    @id @default(uuid())
+  id             String                    @id @default(uuid())
   organizationId String
-  clientId      String?
-  createdById   String
-  assignedToId  String?
-  type          SupportConversationType   @default(CHAT)
-  status        SupportConversationStatus @default(OPEN)
-  subject       String?
-  priority      String                    @default("normal")
-  lastMessageAt DateTime                  @default(now())
-  createdAt     DateTime                  @default(now())
-  updatedAt     DateTime                  @updatedAt
-  messages      SupportMessage[]
+  clientId       String?
+  createdById    String
+  assignedToId   String?
+  type           SupportConversationType   @default(CHAT)
+  status         SupportConversationStatus @default(OPEN)
+  subject        String?
+  priority       String                    @default("normal")
+  lastMessageAt  DateTime                  @default(now())
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  messages       SupportMessage[]
 
   @@index([organizationId, lastMessageAt])
   @@index([organizationId, clientId, lastMessageAt])
@@ -297,17 +368,17 @@ model SupportConversation {
 }
 
 model SupportMessage {
-  id               String             @id @default(uuid())
+  id               String              @id @default(uuid())
   conversationId   String
   conversation     SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   senderId         String
-  kind             SupportMessageKind @default(TEXT)
+  kind             SupportMessageKind  @default(TEXT)
   body             String?
   attachmentName   String?
   attachmentMime   String?
   attachmentSize   Int?
   attachmentData   Bytes?
-  createdAt        DateTime           @default(now())
+  createdAt        DateTime            @default(now())
 
   @@index([conversationId, createdAt])
   @@index([senderId, createdAt])
@@ -328,6 +399,7 @@ model AuditLog {
   id             String   @id @default(uuid())
   organizationId String?
   userId         String?
+  businessId     String?
   action         String
   entity         String?
   entityId       String?
@@ -337,4 +409,5 @@ model AuditLog {
   createdAt      DateTime @default(now())
 
   @@index([organizationId, createdAt])
+  @@index([organizationId, businessId, createdAt])
 }
