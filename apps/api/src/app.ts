@@ -12,6 +12,7 @@ import { registerMetaDisconnectRoutes } from './metaDisconnectRoutes.js';
 import { registerTenantRoutes } from './tenantRoutes.js';
 import { registerBmAccessRoutes } from './bmAccessRoutes.js';
 import { registerMetaBusinessRoutes } from './metaBusinessRoutes.js';
+import { registerMetaAccountAssignmentRoutes } from './metaAccountAssignmentRoutes.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -29,5 +30,6 @@ export async function buildApp() {
   await registerTenantRoutes(app);
   await registerBmAccessRoutes(app);
   await registerMetaBusinessRoutes(app);
+  await registerMetaAccountAssignmentRoutes(app);
   return app;
 }
