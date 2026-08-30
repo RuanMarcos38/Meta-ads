@@ -46,21 +46,41 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
 
       for (const scope of scopes.values()) {
         try {
-          const importedAccounts = await prisma.insightDaily.findMany({
-            where: {
-              organizationId: scope.organizationId,
-              clientId: scope.clientId,
-              level: 'campaign',
-              adAccountId: { in: scope.accountIds },
-            },
-            distinct: ['adAccountId'],
-            select: { adAccountId: true },
-          });
+          const [importedAccounts, successfulHistoryJob] = await Promise.all([
+            prisma.insightDaily.findMany({
+              where: {
+                organizationId: scope.organizationId,
+                clientId: scope.clientId,
+                level: 'campaign',
+                adAccountId: { in: scope.accountIds },
+              },
+              distinct: ['adAccountId'],
+              select: { adAccountId: true },
+            }),
+            prisma.syncJob.findFirst({
+              where: {
+                organizationId: scope.organizationId,
+                clientId: scope.clientId,
+                type: 'history',
+                status: 'success',
+              },
+              select: { id: true },
+            }),
+          ]);
+
           const importedIds = new Set(importedAccounts.map((item) => item.adAccountId));
-          const needsHistory = scope.accountIds.some((id) => !importedIds.has(id));
+          const hasAccountWithoutMetrics = scope.accountIds.some((id) => !importedIds.has(id));
+          const needsHistory = hasAccountWithoutMetrics || !successfulHistoryJob;
 
           if (needsHistory) {
-            logger.info({ organizationId: scope.organizationId, clientId: scope.clientId }, 'Nova conta/BM detectada: iniciando importação histórica.');
+            logger.info(
+              {
+                organizationId: scope.organizationId,
+                clientId: scope.clientId,
+                reason: hasAccountWithoutMetrics ? 'new_account' : 'history_not_completed',
+              },
+              'Importação histórica completa obrigatória iniciada para empresa/BM.',
+            );
             await runSync(scope.organizationId, scope.clientId, undefined, 'history', { fullHistory: true });
           } else {
             await runSync(scope.organizationId, scope.clientId, undefined, 'automatic');
@@ -79,7 +99,7 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
   const initialTimer = setTimeout(() => { void tick(); }, Math.min(30_000, intervalMs));
   const intervalTimer = setInterval(() => { void tick(); }, intervalMs);
 
-  logger.info(`Sincronização automática Meta configurada para cada ${intervalMinutes} minuto(s), com backfill histórico em novas contas.`);
+  logger.info(`Sincronização automática Meta configurada para cada ${intervalMinutes} minuto(s), com backfill histórico completo obrigatório por empresa e em novas contas.`);
 
   return () => {
     stopped = true;
