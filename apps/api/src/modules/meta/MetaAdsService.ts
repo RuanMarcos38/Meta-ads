@@ -25,6 +25,26 @@ async function getPaged(url: string, params: Record<string, string>) {
   return results;
 }
 
+async function getPagedWithFieldFallback(
+  url: string,
+  accessToken: string,
+  fieldOptions: string[],
+  limit = '100',
+) {
+  for (const fields of fieldOptions) {
+    try {
+      return await getPaged(url, {
+        access_token: accessToken,
+        fields,
+        limit,
+      });
+    } catch {
+      // Algumas contas/versões da Graph API não expõem todos os campos.
+    }
+  }
+  return [];
+}
+
 async function postForm<T>(url: string, accessToken: string, values: Record<string, string>): Promise<T> {
   const body = new URLSearchParams();
   body.set('access_token', accessToken);
@@ -51,6 +71,40 @@ export type MetaBusinessRef = {
   businessName: string;
 };
 
+export type MetaBusinessUser = {
+  id: string;
+  name?: string;
+  email?: string;
+  role?: string;
+  status?: string;
+};
+
+export type MetaBusinessAdAccount = {
+  accountId: string;
+  name?: string;
+  currency?: string;
+  accountStatus?: number | null;
+};
+
+export type MetaBusinessDirectoryItem = {
+  businessId: string;
+  businessName: string;
+  users: MetaBusinessUser[];
+  admins: MetaBusinessUser[];
+  pendingUsers: MetaBusinessUser[];
+  adAccounts: MetaBusinessAdAccount[];
+};
+
+function normalizeBusinessUser(value: any): MetaBusinessUser {
+  return {
+    id: String(value?.id || ''),
+    name: value?.name ? String(value.name) : undefined,
+    email: value?.email ? String(value.email).trim().toLowerCase() : undefined,
+    role: value?.role ? String(value.role).toUpperCase() : undefined,
+    status: value?.status ? String(value.status).toUpperCase() : undefined,
+  };
+}
+
 export class MetaAdsService {
   constructor(private accessToken: string) {}
 
@@ -59,6 +113,77 @@ export class MetaAdsService {
       access_token: this.accessToken,
       fields: 'account_id,name,currency,timezone_name,account_status',
     });
+  }
+
+  async businessDirectory(): Promise<MetaBusinessDirectoryItem[]> {
+    const businesses = await getPaged(`${BASE()}/me/businesses`, {
+      access_token: this.accessToken,
+      fields: 'id,name',
+      limit: '100',
+    });
+
+    const directory: MetaBusinessDirectoryItem[] = [];
+
+    for (const business of businesses) {
+      const businessId = String(business?.id || '').trim();
+      if (!businessId) continue;
+      const businessName = String(business?.name || `BM ${businessId}`);
+
+      const usersRaw = await getPagedWithFieldFallback(
+        `${BASE()}/${businessId}/business_users`,
+        this.accessToken,
+        [
+          'id,name,email,role,status',
+          'id,name,email,role',
+          'id,name,role,status',
+          'id,name,role',
+          'id,name',
+        ],
+      );
+      const users = usersRaw.map(normalizeBusinessUser).filter((item) => item.id);
+      const admins = users.filter((item) => String(item.role || '').toUpperCase() === 'ADMIN');
+
+      const pendingRaw = await getPagedWithFieldFallback(
+        `${BASE()}/${businessId}/pending_users`,
+        this.accessToken,
+        ['id,email,role,status', 'id,email,role', 'id,email', 'id'],
+      );
+      const pendingUsers = pendingRaw.map(normalizeBusinessUser).filter((item) => item.id);
+
+      const accountMap = new Map<string, MetaBusinessAdAccount>();
+      for (const edge of ['owned_ad_accounts', 'client_ad_accounts']) {
+        try {
+          const accounts = await getPaged(`${BASE()}/${businessId}/${edge}`, {
+            access_token: this.accessToken,
+            fields: 'account_id,name,currency,account_status',
+            limit: '200',
+          });
+          for (const account of accounts) {
+            const accountId = String(account?.account_id || '').replace(/^act_/, '');
+            if (!accountId || accountMap.has(accountId)) continue;
+            accountMap.set(accountId, {
+              accountId,
+              name: account?.name ? String(account.name) : undefined,
+              currency: account?.currency ? String(account.currency) : undefined,
+              accountStatus: account?.account_status == null ? null : Number(account.account_status),
+            });
+          }
+        } catch {
+          // Uma BM pode estar visível ao usuário sem liberar um dos edges de contas.
+        }
+      }
+
+      directory.push({
+        businessId,
+        businessName,
+        users,
+        admins,
+        pendingUsers,
+        adAccounts: Array.from(accountMap.values()).sort((a, b) => String(a.name || a.accountId).localeCompare(String(b.name || b.accountId))),
+      });
+    }
+
+    return directory.sort((a, b) => a.businessName.localeCompare(b.businessName));
   }
 
   async businessAdAccountMap(): Promise<Map<string, MetaBusinessRef>> {
