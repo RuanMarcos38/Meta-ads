@@ -6,7 +6,7 @@ import Login from './pages/Login';
 import Layout from './components/Layout';
 import Dashboard from './pages/DashboardScoped';
 import Campaigns from './pages/CampaignsScoped';
-import Clients from './pages/ClientsScoped';
+import Clients from './pages/ClientsResilient';
 import { useAuth } from './store';
 
 function Private({ children }: { children: React.ReactNode }) {
