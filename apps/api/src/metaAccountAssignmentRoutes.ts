@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from './shared/prisma.js';
 import { requireAuth, type AuthUser } from './shared/auth.js';
 import { fail, ok } from './shared/response.js';
+import { env } from './config/env.js';
 import { runSync } from './modules/meta/syncService.js';
 
 const paramsSchema = z.object({ id: z.string().uuid() });
@@ -122,9 +123,10 @@ export async function registerMetaAccountAssignmentRoutes(app: FastifyInstance) 
     }
 
     // Na primeira autorização, inicia o backfill completo em segundo plano.
-    // A resposta do botão não fica bloqueada; o scheduler também recupera a importação
-    // caso o processo seja interrompido antes de concluir.
-    if (body.data.isAssigned && !account.isAssigned) {
+    // Em CI/demo não fazemos chamadas externas. Em produção, o scheduler também
+    // recupera a importação caso o processo seja interrompido antes de concluir.
+    const shouldStartHistory = body.data.isAssigned && !account.isAssigned && !env.demoMode;
+    if (shouldStartHistory) {
       const existingHistory = await prisma.syncJob.findFirst({
         where: {
           organizationId: user.organizationId!,
@@ -146,7 +148,7 @@ export async function registerMetaAccountAssignmentRoutes(app: FastifyInstance) 
     }
 
     return ok(
-      { ...updated, historySyncStarted: Boolean(body.data.isAssigned && !account.isAssigned) },
+      { ...updated, historySyncStarted: shouldStartHistory },
       body.data.isAssigned
         ? 'Conta Meta autorizada. O histórico completo será sincronizado automaticamente.'
         : 'Conta Meta removida do dashboard desta empresa.',
