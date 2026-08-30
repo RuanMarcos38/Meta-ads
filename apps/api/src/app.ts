@@ -18,7 +18,13 @@ export async function buildApp() {
   const app = Fastify({ logger: true });
 
   await app.register(helmet);
-  await app.register(cors, { origin: env.corsOrigins, credentials: true });
+  await app.register(cors, {
+    origin: env.corsOrigins,
+    credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 86400,
+  });
   await app.register(jwt, { secret: env.jwtSecret });
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
