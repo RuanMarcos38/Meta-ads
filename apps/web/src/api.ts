@@ -7,6 +7,14 @@ export const api = axios.create({
   timeout: 15000,
 });
 
+type CompatRequest = {
+  _retry?: boolean;
+  _assignmentCompatPost?: boolean;
+  _assignmentLegacyPatch?: boolean;
+};
+
+const assignmentPath = (url?: string) => /^\/meta\/client-accounts\/[^/]+\/assignment$/.test(url || '');
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -17,14 +25,17 @@ api.interceptors.request.use((config) => {
     config.timeout = 120000;
   }
 
-  // Compatibilidade de produção: alguns proxies/reverse proxies podem rejeitar PATCH
-  // mesmo quando a API aceita o endpoint. A autorização de contas possui uma rota POST
-  // equivalente e idempotente no backend, então convertemos somente este caso específico.
+  // Compatibilidade de produção: preferimos POST para autorização de conta, pois alguns
+  // proxies/reverse proxies rejeitam PATCH. Se o backend ainda estiver na versão antiga,
+  // o interceptor de resposta faz fallback automático para PATCH sem alterar a tela.
+  const compat = config as typeof config & CompatRequest;
   if (
     config.method?.toLowerCase() === 'patch'
-    && /^\/meta\/client-accounts\/[^/]+\/assignment$/.test(config.url || '')
+    && assignmentPath(config.url)
+    && !compat._assignmentLegacyPatch
   ) {
     config.method = 'post';
+    compat._assignmentCompatPost = true;
   }
 
   return config;
@@ -35,8 +46,21 @@ let refreshRequest: Promise<string> | null = null;
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const request = error.config as (typeof error.config & { _retry?: boolean }) | undefined;
+    const request = error.config as (typeof error.config & CompatRequest) | undefined;
     const isAuthRoute = request?.url?.includes('/auth/login') || request?.url?.includes('/auth/refresh');
+
+    if (
+      request
+      && request._assignmentCompatPost
+      && !request._assignmentLegacyPatch
+      && request.method?.toLowerCase() === 'post'
+      && assignmentPath(request.url)
+      && [404, 405].includes(Number(error.response?.status || 0))
+    ) {
+      request._assignmentLegacyPatch = true;
+      request.method = 'patch';
+      return api(request);
+    }
 
     if (error.response?.status === 401 && request && !request._retry && !isAuthRoute) {
       request._retry = true;
