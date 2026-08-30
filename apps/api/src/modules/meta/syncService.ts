@@ -29,7 +29,7 @@ function earliestCampaignDate(campaigns: any[], fallback: string) {
     const candidate = dayjs(campaign.start_time).format('YYYY-MM-DD');
     if (!earliest || candidate < earliest) earliest = candidate;
   }
-  return earliest && earliest < fallback ? earliest : fallback;
+  return earliest ?? fallback;
 }
 
 export async function runSync(
