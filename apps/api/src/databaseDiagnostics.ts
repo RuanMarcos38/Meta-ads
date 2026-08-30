@@ -3,6 +3,8 @@ import { env } from './config/env.js';
 import { prisma } from './shared/prisma.js';
 import { ok } from './shared/response.js';
 
+const META_ACCOUNT_ASSIGNMENT_RELEASE = '2026.08.29.1';
+
 type DatabaseErrorShape = {
   code?: unknown;
   name?: unknown;
@@ -19,6 +21,7 @@ function safeDatabaseTarget() {
       sslMode: null,
       schema: env.databaseSchema,
       projectRef: env.supabaseProjectRef,
+      metaAccountAssignmentRelease: META_ACCOUNT_ASSIGNMENT_RELEASE,
     };
   }
 
@@ -32,6 +35,7 @@ function safeDatabaseTarget() {
       sslMode: parsed.searchParams.get('sslmode'),
       schema: parsed.searchParams.get('schema') || env.databaseSchema,
       projectRef: env.supabaseProjectRef,
+      metaAccountAssignmentRelease: META_ACCOUNT_ASSIGNMENT_RELEASE,
     };
   } catch {
     return {
@@ -42,6 +46,7 @@ function safeDatabaseTarget() {
       sslMode: null,
       schema: env.databaseSchema,
       projectRef: env.supabaseProjectRef,
+      metaAccountAssignmentRelease: META_ACCOUNT_ASSIGNMENT_RELEASE,
     };
   }
 }
