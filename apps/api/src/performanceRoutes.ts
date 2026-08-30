@@ -8,6 +8,7 @@ import { runSync } from './modules/meta/syncService.js';
 
 const asNumber = (value: unknown) => Number(value ?? 0);
 const restrictedRoles = new Set(['CLIENT', 'MANAGER']);
+const adminRoles = new Set(['SUPER_ADMIN', 'AGENCY_ADMIN']);
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const performanceScopeSchema = z.object({
@@ -24,6 +25,8 @@ type PerformanceInput = z.infer<typeof performanceScopeSchema>;
 type ResolvedPerformanceScope = {
   clientId: string;
   accountIds: string[];
+  campaignId?: string;
+  adSetId?: string;
   since: string;
   until: string;
   sinceDate: Date;
@@ -109,8 +112,8 @@ function resolveDates(input: PerformanceInput, reply: FastifyReply) {
     reply.code(400).send(fail('INVALID_PERIOD', 'A data inicial não pode ser posterior à data final.'));
     return null;
   }
-  if (until.diff(since, 'day') > 366) {
-    reply.code(400).send(fail('PERIOD_TOO_LONG', 'Selecione um período de até 366 dias por consulta.'));
+  if (until.diff(since, 'day') > 7300) {
+    reply.code(400).send(fail('PERIOD_TOO_LONG', 'Selecione um período de até 20 anos por consulta.'));
     return null;
   }
   const sinceText = since.format('YYYY-MM-DD');
@@ -123,11 +126,7 @@ function resolveDates(input: PerformanceInput, reply: FastifyReply) {
   };
 }
 
-async function resolvePerformanceScope(
-  user: AuthUser,
-  input: PerformanceInput,
-  reply: FastifyReply,
-): Promise<ResolvedPerformanceScope | null> {
+async function resolvePerformanceScope(user: AuthUser, input: PerformanceInput, reply: FastifyReply): Promise<ResolvedPerformanceScope | null> {
   const dates = resolveDates(input, reply);
   if (!dates) return null;
 
@@ -168,7 +167,13 @@ async function resolvePerformanceScope(
     return null;
   }
 
-  return { clientId, accountIds: accounts.map((account) => account.id), ...dates };
+  return {
+    clientId,
+    accountIds: accounts.map((account) => account.id),
+    campaignId: input.campaignId,
+    adSetId: input.adSetId,
+    ...dates,
+  };
 }
 
 function insightWhere(user: AuthUser, scope: ResolvedPerformanceScope, level: 'campaign' | 'adset' | 'ad') {
@@ -178,7 +183,33 @@ function insightWhere(user: AuthUser, scope: ResolvedPerformanceScope, level: 'c
     level,
     adAccountId: { in: scope.accountIds },
     date: { gte: scope.sinceDate, lte: scope.untilDate },
+    ...(scope.campaignId ? { campaignId: scope.campaignId } : {}),
+    ...(level !== 'campaign' && scope.adSetId ? { adSetId: scope.adSetId } : {}),
   };
+}
+
+async function ensureSyncClient(user: AuthUser, requestedClientId: string | undefined, reply: FastifyReply) {
+  const clientId = scopeClient(user, requestedClientId);
+  if (!clientId) {
+    reply.code(restrictedRoles.has(user.role) ? 403 : 400).send(fail('CLIENT_REQUIRED', 'Selecione uma empresa para sincronizar.'));
+    return null;
+  }
+  const client = await prisma.client.findFirst({
+    where: { id: clientId, organizationId: user.organizationId! },
+    select: { id: true, name: true },
+  });
+  if (!client) {
+    reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Empresa não encontrada para sincronização.'));
+    return null;
+  }
+  const assignedAccounts = await prisma.metaAdAccount.count({
+    where: { organizationId: user.organizationId!, clientId, isActive: true, isAssigned: true },
+  });
+  if (!assignedAccounts) {
+    reply.code(409).send(fail('NO_ASSIGNED_META_ACCOUNTS', 'Selecione ao menos uma conta Meta antes de sincronizar.'));
+    return null;
+  }
+  return client;
 }
 
 export async function registerPerformanceRoutes(app: FastifyInstance) {
@@ -188,10 +219,7 @@ export async function registerPerformanceRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send(fail('VALIDATION', 'Filtros de desempenho inválidos.'));
     const scope = await resolvePerformanceScope(user, parsed.data, reply);
     if (!scope) return;
-
-    const rows = scope.accountIds.length
-      ? await prisma.insightDaily.findMany({ where: insightWhere(user, scope, 'campaign') })
-      : [];
+    const rows = scope.accountIds.length ? await prisma.insightDaily.findMany({ where: insightWhere(user, scope, 'campaign') }) : [];
     const totals = rows.reduce((acc, row) => addRow(acc, row), emptyTotals());
     return ok({ ...decorateMetrics(totals), period: { since: scope.since, until: scope.until } });
   });
@@ -202,14 +230,15 @@ export async function registerPerformanceRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send(fail('VALIDATION', 'Filtros de desempenho inválidos.'));
     const scope = await resolvePerformanceScope(user, parsed.data, reply);
     if (!scope) return;
-
     const rows = scope.accountIds.length
       ? await prisma.insightDaily.findMany({ where: insightWhere(user, scope, 'campaign'), orderBy: { date: 'asc' } })
       : [];
     const daily = new Map<string, Totals>();
     for (const row of rows) {
       const iso = row.date.toISOString().slice(0, 10);
-      addRow(daily.get(iso) ?? (() => { const item = emptyTotals(); daily.set(iso, item); return item; })(), row);
+      const current = daily.get(iso) ?? emptyTotals();
+      addRow(current, row);
+      daily.set(iso, current);
     }
     return ok(Array.from(daily.entries()).map(([date, metric]) => ({ date, ...decorateMetrics(metric) })));
   });
@@ -229,12 +258,10 @@ export async function registerPerformanceRoutes(app: FastifyInstance) {
         ...(parsed.data.campaignId ? { metaCampaignId: parsed.data.campaignId } : {}),
       },
       include: {
-        adAccount: {
-          select: { id: true, accountId: true, name: true, businessId: true, businessName: true, currency: true },
-        },
+        adAccount: { select: { id: true, accountId: true, name: true, businessId: true, businessName: true, currency: true } },
         _count: { select: { adSets: true } },
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
     }) : [];
 
     const ids = campaigns.map((item) => item.metaCampaignId);
@@ -269,11 +296,7 @@ export async function registerPerformanceRoutes(app: FastifyInstance) {
         },
       },
       include: {
-        campaign: {
-          include: {
-            adAccount: { select: { id: true, accountId: true, name: true, businessId: true, businessName: true, currency: true } },
-          },
-        },
+        campaign: { include: { adAccount: { select: { id: true, accountId: true, name: true, businessId: true, businessName: true, currency: true } } } },
         _count: { select: { ads: true } },
       },
       orderBy: { updatedAt: 'desc' },
@@ -302,7 +325,6 @@ export async function registerPerformanceRoutes(app: FastifyInstance) {
 
     const ads = scope.accountIds.length ? await prisma.ad.findMany({
       where: {
-        ...(parsed.data.adSetId ? { adSet: { metaAdsetId: parsed.data.adSetId } } : {}),
         adSet: {
           ...(parsed.data.adSetId ? { metaAdsetId: parsed.data.adSetId } : {}),
           campaign: {
@@ -314,15 +336,7 @@ export async function registerPerformanceRoutes(app: FastifyInstance) {
         },
       },
       include: {
-        adSet: {
-          include: {
-            campaign: {
-              include: {
-                adAccount: { select: { id: true, accountId: true, name: true, businessId: true, businessName: true, currency: true } },
-              },
-            },
-          },
-        },
+        adSet: { include: { campaign: { include: { adAccount: { select: { id: true, accountId: true, name: true, businessId: true, businessName: true, currency: true } } } } } },
       },
       orderBy: { updatedAt: 'desc' },
     }) : [];
@@ -346,31 +360,117 @@ export async function registerPerformanceRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send(fail('VALIDATION', 'Empresa ou período inválido para sincronização.'));
     const dates = resolveDates(parsed.data, reply);
     if (!dates) return;
-
-    const clientId = scopeClient(user, parsed.data.clientId);
-    if (!clientId) {
-      return reply.code(restrictedRoles.has(user.role) ? 403 : 400).send(fail('CLIENT_REQUIRED', 'Selecione uma empresa para sincronizar.'));
-    }
-
-    const client = await prisma.client.findFirst({
-      where: { id: clientId, organizationId: user.organizationId! },
-      select: { id: true },
-    });
-    if (!client) return reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Empresa não encontrada para sincronização.'));
-
-    const assignedAccounts = await prisma.metaAdAccount.count({
-      where: { organizationId: user.organizationId!, clientId, isActive: true, isAssigned: true },
-    });
-    if (!assignedAccounts) {
-      return reply.code(409).send(fail('NO_ASSIGNED_META_ACCOUNTS', 'Selecione ao menos uma conta Meta antes de sincronizar.'));
-    }
+    const client = await ensureSyncClient(user, parsed.data.clientId, reply);
+    if (!client) return;
 
     try {
-      const result = await runSync(user.organizationId!, clientId, user.id, 'manual', { since: dates.since, until: dates.until });
+      const result = await runSync(user.organizationId!, client.id, user.id, 'manual', { since: dates.since, until: dates.until });
       return ok(result, 'Métricas, conjuntos e anúncios sincronizados com a Meta.');
     } catch (error: any) {
-      req.log.error({ err: error, clientId, since: dates.since, until: dates.until }, 'performance sync failed');
+      req.log.error({ err: error, clientId: client.id, since: dates.since, until: dates.until }, 'performance sync failed');
       return reply.code(502).send(fail('META_SYNC_ERROR', 'Falha ao sincronizar o período selecionado com a Meta.'));
     }
+  });
+
+  app.get('/performance/history-status', { preHandler: requireAuth() }, async (req, reply) => {
+    const user = req.user as AuthUser;
+    const parsed = performanceScopeSchema.pick({ clientId: true }).safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send(fail('VALIDATION', 'Empresa inválida.'));
+    const client = await ensureSyncClient(user, parsed.data.clientId, reply);
+    if (!client) return;
+
+    const [coverage, latestJob] = await Promise.all([
+      prisma.insightDaily.aggregate({
+        where: { organizationId: user.organizationId!, clientId: client.id, level: 'campaign' },
+        _min: { date: true },
+        _max: { date: true },
+        _count: { id: true },
+      }),
+      prisma.syncJob.findFirst({
+        where: { organizationId: user.organizationId!, clientId: client.id, type: { in: ['history', 'history_full'] } },
+        orderBy: { startedAt: 'desc' },
+      }),
+    ]);
+
+    return ok({
+      clientId: client.id,
+      clientName: client.name,
+      earliestDate: coverage._min.date,
+      latestDate: coverage._max.date,
+      dailyRows: coverage._count.id,
+      latestJob,
+    });
+  });
+
+  app.post('/performance/history-sync', { preHandler: requireAuth() }, async (req, reply) => {
+    const user = req.user as AuthUser;
+    const parsed = performanceScopeSchema.pick({ clientId: true }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send(fail('VALIDATION', 'Empresa inválida.'));
+    const client = await ensureSyncClient(user, parsed.data.clientId, reply);
+    if (!client) return;
+
+    const master = await prisma.syncJob.create({
+      data: { organizationId: user.organizationId!, clientId: client.id, type: 'history_full', status: 'running', createdBy: user.id },
+    });
+
+    setImmediate(async () => {
+      try {
+        const result = await runSync(user.organizationId!, client.id, user.id, 'history', { fullHistory: true });
+        await prisma.syncJob.update({
+          where: { id: master.id },
+          data: { status: 'success', finishedAt: new Date(), recordsProcessed: result.processed },
+        });
+      } catch (error: any) {
+        await prisma.syncJob.update({
+          where: { id: master.id },
+          data: { status: 'error', finishedAt: new Date(), errorMessage: error?.message ?? 'Erro na importação histórica.' },
+        }).catch(() => undefined);
+      }
+    });
+
+    return reply.code(202).send(ok({ jobId: master.id, clientId: client.id }, 'Importação do histórico completo iniciada.'));
+  });
+
+  app.post('/performance/history-sync-all', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
+    const user = req.user as AuthUser;
+    if (!adminRoles.has(user.role)) return reply.code(403).send(fail('FORBIDDEN', 'Apenas administradores podem importar todas as empresas.'));
+
+    const clients = await prisma.client.findMany({
+      where: {
+        organizationId: user.organizationId!,
+        adAccounts: { some: { isActive: true, isAssigned: true } },
+      },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    if (!clients.length) return reply.code(409).send(fail('NO_ASSIGNED_META_ACCOUNTS', 'Nenhuma empresa possui conta Meta autorizada.'));
+
+    const master = await prisma.syncJob.create({
+      data: { organizationId: user.organizationId!, type: 'history_all', status: 'running', createdBy: user.id },
+    });
+
+    setImmediate(async () => {
+      let processed = 0;
+      const errors: string[] = [];
+      for (const client of clients) {
+        try {
+          const result = await runSync(user.organizationId!, client.id, user.id, 'history', { fullHistory: true });
+          processed += result.processed;
+        } catch (error: any) {
+          errors.push(`${client.name}: ${error?.message ?? 'falha'}`);
+        }
+      }
+      await prisma.syncJob.update({
+        where: { id: master.id },
+        data: {
+          status: errors.length === clients.length ? 'error' : 'success',
+          finishedAt: new Date(),
+          recordsProcessed: processed,
+          errorMessage: errors.length ? errors.slice(0, 20).join(' | ') : null,
+        },
+      }).catch(() => undefined);
+    });
+
+    return reply.code(202).send(ok({ jobId: master.id, clients: clients.length }, 'Importação histórica de todas as empresas iniciada.'));
   });
 }
