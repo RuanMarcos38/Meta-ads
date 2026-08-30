@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
+import { env } from '../config/env.js';
 import { prisma } from '../shared/prisma.js';
 
 const integrationEnabled = process.env.RUN_INTEGRATION_TESTS === 'true';
@@ -73,18 +74,19 @@ suite('Meta account assignment compatibility', () => {
   });
 
   it('libera PATCH e POST no preflight CORS da autorização Meta', async () => {
+    const corsOrigin = env.corsOrigins[0] || 'http://localhost:5173';
     const response = await app.inject({
       method: 'OPTIONS',
       url: `/meta/client-accounts/${accountId}/assignment`,
       headers: {
-        origin: 'https://gestao.r2rmarketingdigital.com.br',
+        origin: corsOrigin,
         'access-control-request-method': 'PATCH',
         'access-control-request-headers': 'authorization,content-type',
       },
     });
 
     expect([200, 204]).toContain(response.statusCode);
-    expect(response.headers['access-control-allow-origin']).toBe('https://gestao.r2rmarketingdigital.com.br');
+    expect(response.headers['access-control-allow-origin']).toBe(corsOrigin);
     const methods = String(response.headers['access-control-allow-methods'] || '');
     expect(methods).toContain('PATCH');
     expect(methods).toContain('POST');
