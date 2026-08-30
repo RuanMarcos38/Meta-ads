@@ -21,6 +21,8 @@ function normalizeBusinessId(value?: string | null) {
 }
 
 export async function registerBmAccessRoutes(app: FastifyInstance) {
+  // O login é sempre por e-mail + senha. A BM é um escopo interno do usuário/empresa.
+  // businessId permanece opcional no schema apenas para compatibilidade com builds antigos.
   app.post('/auth/login-bm', async (req, reply) => {
     if (env.configurationErrors.length) return configurationFailure(reply);
 
@@ -37,42 +39,16 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
       include: { client: true },
     });
     if (!user || !user.isActive) {
-      return reply.code(401).send(fail('INVALID_CREDENTIALS', 'E-mail, senha ou BM inválidos.'));
+      return reply.code(401).send(fail('INVALID_CREDENTIALS', 'E-mail ou senha inválidos.'));
     }
 
     const password = await verifyPassword(body.data.password, user.passwordHash);
     if (!password.valid) {
-      return reply.code(401).send(fail('INVALID_CREDENTIALS', 'E-mail, senha ou BM inválidos.'));
+      return reply.code(401).send(fail('INVALID_CREDENTIALS', 'E-mail ou senha inválidos.'));
     }
 
-    const requestedBusinessId = normalizeBusinessId(body.data.businessId);
     const isTenant = tenantRoles.has(user.role);
     const linkedBusinessId = normalizeBusinessId(user.businessId || user.client?.metaBusinessId);
-
-    if (isTenant) {
-      if (!requestedBusinessId) {
-        return reply.code(400).send(fail('BM_REQUIRED', 'Informe o ID da Business Manager vinculada ao seu acesso.'));
-      }
-      if (!user.clientId || !linkedBusinessId) {
-        return reply.code(403).send(fail('BM_NOT_LINKED', 'Seu acesso ainda não possui uma Business Manager vinculada.'));
-      }
-      if (requestedBusinessId !== linkedBusinessId) {
-        return reply.code(401).send(fail('INVALID_BM', 'A Business Manager informada não pertence a este acesso.'));
-      }
-
-      const authorizedAccounts = await prisma.metaAdAccount.count({
-        where: {
-          organizationId: user.organizationId!,
-          clientId: user.clientId,
-          businessId: linkedBusinessId,
-          isActive: true,
-          isAssigned: true,
-        },
-      });
-      if (!authorizedAccounts) {
-        return reply.code(403).send(fail('BM_WITHOUT_ACCOUNTS', 'Esta BM ainda não possui contas Meta autorizadas no sistema.'));
-      }
-    }
 
     await prisma.user.update({
       where: { id: user.id },
@@ -91,8 +67,9 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
         ip: req.ip,
         userAgent: req.headers['user-agent'],
         metadataJson: {
-          businessId: isTenant ? linkedBusinessId : requestedBusinessId || null,
+          businessId: isTenant ? linkedBusinessId || null : null,
           clientId: user.clientId || null,
+          businessConfigured: Boolean(linkedBusinessId),
           legacyPasswordHashUpgraded: Boolean(password.upgradedHash),
         },
       },
@@ -103,7 +80,7 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
       role: user.role,
       organizationId: user.organizationId ?? undefined,
       clientId: user.clientId ?? undefined,
-      businessId: isTenant ? linkedBusinessId : undefined,
+      businessId: isTenant && linkedBusinessId ? linkedBusinessId : undefined,
     };
     const token = app.jwt.sign(payload, { expiresIn: env.jwtExpiresIn });
     const refresh = app.jwt.sign(payload, {
@@ -120,7 +97,7 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
         email: user.email,
         role: user.role,
         clientId: user.clientId,
-        businessId: isTenant ? linkedBusinessId : null,
+        businessId: isTenant && linkedBusinessId ? linkedBusinessId : null,
         businessName: isTenant ? user.client?.metaBusinessName || null : null,
         mustChangePassword: user.mustChangePassword,
       },
@@ -140,14 +117,13 @@ export async function registerBmAccessRoutes(app: FastifyInstance) {
 
       const isTenant = tenantRoles.has(user.role);
       const linkedBusinessId = normalizeBusinessId(user.businessId || user.client?.metaBusinessId);
-      if (isTenant && (!user.clientId || !linkedBusinessId)) throw new Error('Escopo BM inválido');
 
       const nextPayload: AuthUser = {
         id: user.id,
         role: user.role,
         organizationId: user.organizationId ?? undefined,
         clientId: user.clientId ?? undefined,
-        businessId: isTenant ? linkedBusinessId : undefined,
+        businessId: isTenant && linkedBusinessId ? linkedBusinessId : undefined,
       };
       const token = app.jwt.sign(nextPayload, { expiresIn: env.jwtExpiresIn });
       return ok({ token });
