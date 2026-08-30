@@ -13,6 +13,77 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    env:
+      EASYPANEL_DEPLOY_TRIGGER_URL: ${{ secrets.EASYPANEL_DEPLOY_TRIGGER_URL }}
+      EASYPANEL_DEPLOY_URL: ${{ secrets.EASYPANEL_DEPLOY_URL }}
+      EASYPANEL_WEBHOOK_URL: ${{ secrets.EASYPANEL_WEBHOOK_URL }}
+      API_URL: https://api-gestao.r2rmarketingdigital.com.br
+      FRONTEND_ORIGIN: https://gestao.r2rmarketingdigital.com.br
+      EXPECTED_RELEASE: 2026.08.29.1
+      TEST_ACCOUNT_UUID: e5d248a9-5dc1-486f-b1c8-0158c0f4a1d5
+    steps:
+      - name: Resolve EasyPanel deployment trigger
+        run: |
+          set -euo pipefail
+          trigger="${EASYPANEL_DEPLOY_TRIGGER_URL:-}"
+          [ -n "$trigger" ] || trigger="${EASYPANEL_DEPLOY_URL:-}"
+          [ -n "$trigger" ] || trigger="${EASYPANEL_WEBHOOK_URL:-}"
+          if [ -z "$trigger" ]; then
+            echo "EASYPANEL_TRIGGER_READY=false" >> "$GITHUB_ENV"
+            echo "Nenhum Deployment Trigger URL do EasyPanel foi encontrado nos Secrets do GitHub."
+          else
+            echo "EASYPANEL_TRIGGER_READY=true" >> "$GITHUB_ENV"
+            echo "EASYPANEL_TRIGGER_URL=$trigger" >> "$GITHUB_ENV"
+            echo "Deployment Trigger URL do EasyPanel encontrado."
+          fi
+
+      - name: Trigger EasyPanel backend deployment
+        if: env.EASYPANEL_TRIGGER_READY == 'true'
+        run: |
+          set -euo pipefail
+          status="$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/easypanel-response -w '%{http_code}' -X POST "$EASYPANEL_TRIGGER_URL" || true)"
+          if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+            status="$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/easypanel-response -w '%{http_code}' "$EASYPANEL_TRIGGER_URL" || true)"
+          fi
+          echo "EasyPanel deployment trigger HTTP ${status}."
+          if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+            echo "O Deployment Trigger URL do EasyPanel não aceitou a solicitação."
+            exit 1
+          fi
+
+      - name: Verify backend production release
+        if: env.EASYPANEL_TRIGGER_READY == 'true'
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 36); do
+            capability="$(curl -fsSL --connect-timeout 10 --max-time 20 "${API_URL}/meta/account-assignment-capability?attempt=${attempt}" 2>/dev/null || true)"
+            headers="$(mktemp)"
+            curl -sS --connect-timeout 10 --max-time 20 -o /dev/null -D "$headers" -X OPTIONS \
+              -H "Origin: ${FRONTEND_ORIGIN}" \
+              -H "Access-Control-Request-Method: PATCH" \
+              -H "Access-Control-Request-Headers: authorization,content-type" \
+              "${API_URL}/meta/client-accounts/${TEST_ACCOUNT_UUID}/assignment" || true
+            methods="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="access-control-allow-methods" {print $2}' | tail -1)"
+            if printf '%s' "$capability" | jq -e --arg release "$EXPECTED_RELEASE" '.success == true and .data.enabled == true and .data.version == $release' >/dev/null 2>&1 \
+              && printf '%s' "$methods" | grep -q 'PATCH' \
+              && printf '%s' "$methods" | grep -q 'POST'; then
+              echo "Backend do EasyPanel atualizado e validado. Métodos: ${methods}."
+              exit 0
+            fi
+            echo "Tentativa ${attempt}/36: aguardando backend novo no EasyPanel. Métodos atuais: ${methods:-ausentes}."
+            sleep 10
+          done
+          echo "O EasyPanel não publicou a versão nova do backend dentro do tempo de validação."
+          exit 1
+
+      - name: Backend deployment configuration summary
+        if: env.EASYPANEL_TRIGGER_READY != 'true'
+        run: |
+          echo "Backend não foi redeployado automaticamente porque o Deployment Trigger URL do EasyPanel ainda não está salvo nos Secrets do GitHub."
+          echo "Adicione um Secret com um destes nomes: EASYPANEL_DEPLOY_TRIGGER_URL, EASYPANEL_DEPLOY_URL ou EASYPANEL_WEBHOOK_URL."
+
   deploy-frontend:
     runs-on: ubuntu-latest
     env:
