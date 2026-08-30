@@ -18,19 +18,48 @@
 }
 
 html {
+  width: 100%;
+  min-height: 100%;
   background: #f2f4f2;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100vh;
 }
 
 body {
-  min-width: 320px;
-  min-height: 100vh;
   margin: 0;
+  overflow-x: hidden;
   background: #f2f4f2;
   color: #17231d;
   font-family: "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   font-size: 13px;
   line-height: 1.45;
   letter-spacing: 0;
+}
+
+main,
+section,
+article,
+aside,
+header,
+footer,
+form,
+fieldset,
+label {
+  min-width: 0;
+}
+
+img,
+video,
+canvas,
+audio {
+  max-width: 100%;
 }
 
 h1,
@@ -53,8 +82,18 @@ button,
 input,
 select,
 textarea {
+  max-width: 100%;
   font: inherit;
   letter-spacing: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 button {
@@ -88,6 +127,7 @@ textarea:focus-visible {
 .premium-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: #b6c1b9 transparent;
+  -webkit-overflow-scrolling: touch;
 }
 
 .premium-scrollbar::-webkit-scrollbar {
@@ -109,4 +149,91 @@ textarea:focus-visible {
 .premium-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #93a198;
   background-clip: padding-box;
+}
+
+.recharts-responsive-container,
+.recharts-wrapper,
+.recharts-surface {
+  max-width: 100%;
+}
+
+@supports (height: 100dvh) {
+  body,
+  #root {
+    min-height: 100dvh;
+  }
+
+  .app-viewport {
+    min-height: 100dvh;
+  }
+}
+
+/* Mobile: 320px a 639px */
+@media (max-width: 639.98px) {
+  body {
+    min-width: 320px;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  input[type="date"] {
+    min-width: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  span,
+  strong,
+  small,
+  label {
+    overflow-wrap: anywhere;
+  }
+
+  .premium-scrollbar {
+    overscroll-behavior-x: contain;
+  }
+
+  table {
+    white-space: nowrap;
+  }
+
+  audio {
+    width: 100%;
+  }
+}
+
+/* Tablet: 640px a 1023px */
+@media (min-width: 640px) and (max-width: 1023.98px) {
+  .premium-scrollbar {
+    overscroll-behavior-x: contain;
+  }
+
+  table {
+    white-space: nowrap;
+  }
+}
+
+/* Desktop: scroll interno apenas quando há espaço vertical suficiente. */
+@media (min-width: 1024px) {
+  body {
+    overflow: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
