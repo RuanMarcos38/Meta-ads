@@ -17,3 +17,9 @@ export function mapMetaActions(actions?: Action[], primaryResultAction?: string)
   const primary = primaryResultAction ? sumByTypes(actions, [primaryResultAction]) : (leads || conversations || purchases);
   return { leads, conversations, purchases, primaryResult: primary };
 }
+
+export function mapMetaActionValues(actionValues?: Action[]) {
+  return {
+    purchaseValue: sumByTypes(actionValues, PURCHASE_TYPES),
+  };
+}
