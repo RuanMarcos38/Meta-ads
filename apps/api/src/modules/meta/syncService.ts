@@ -5,7 +5,7 @@ import { mapMetaActions, mapMetaActionValues } from './metaActions.js';
 import dayjs from 'dayjs';
 
 export type SyncJobType = 'manual' | 'automatic' | 'oauth' | 'history';
-export type SyncPeriod = { since?: string; until?: string; fullHistory?: boolean };
+export type SyncPeriod = { since?: string; until?: string; fullHistory?: boolean; businessId?: string };
 
 function resolvePeriod(jobType: SyncJobType, period?: SyncPeriod) {
   const until = period?.until && dayjs(period.until).isValid() ? dayjs(period.until) : dayjs();
@@ -32,6 +32,36 @@ function earliestCampaignDate(campaigns: any[], fallback: string) {
   return earliest ?? fallback;
 }
 
+async function ensureBusinessManager(
+  organizationId: string,
+  clientId: string,
+  business: MetaBusinessRef,
+) {
+  return prisma.businessManager.upsert({
+    where: {
+      organizationId_clientId_metaBusinessId: {
+        organizationId,
+        clientId,
+        metaBusinessId: business.businessId,
+      },
+    },
+    update: {
+      name: business.businessName,
+      status: 'active',
+      connectionStatus: 'connected',
+      lastError: null,
+    },
+    create: {
+      organizationId,
+      clientId,
+      metaBusinessId: business.businessId,
+      name: business.businessName,
+      status: 'active',
+      connectionStatus: 'connected',
+    },
+  });
+}
+
 export async function runSync(
   organizationId: string,
   clientId: string | undefined,
@@ -40,16 +70,22 @@ export async function runSync(
   period?: SyncPeriod,
 ) {
   const job = await prisma.syncJob.create({
-    data: { organizationId, clientId, type: jobType, status: 'running', createdBy: userId },
+    data: {
+      organizationId,
+      clientId,
+      businessId: period?.businessId,
+      type: jobType,
+      status: 'running',
+      createdBy: userId,
+    },
   });
 
   try {
-    // Regra multiempresa: somente contas ativas e explicitamente vinculadas ao cliente
-    // podem alimentar campanhas, conjuntos, anúncios, insights e dashboards.
     const accounts = await prisma.metaAdAccount.findMany({
       where: {
         organizationId,
         ...(clientId ? { clientId } : {}),
+        ...(period?.businessId ? { businessId: period.businessId } : {}),
         isActive: true,
         isAssigned: true,
       },
@@ -82,16 +118,31 @@ export async function runSync(
       }
 
       const normalizedAccountId = String(acc.accountId).replace(/^act_/, '');
-      const business = businessMaps.get(acc.connectionId)?.get(normalizedAccountId);
-      if (business && (acc.businessId !== business.businessId || acc.businessName !== business.businessName)) {
-        await prisma.metaAdAccount.update({
-          where: { id: acc.id },
-          data: {
-            businessId: business.businessId,
-            businessName: business.businessName,
-          },
-        });
+      const discoveredBusiness = businessMaps.get(acc.connectionId)?.get(normalizedAccountId);
+      const business = discoveredBusiness ?? (acc.businessId ? {
+        businessId: acc.businessId,
+        businessName: acc.businessName || `BM ${acc.businessId}`,
+      } : undefined);
+
+      if (business) {
+        const manager = await ensureBusinessManager(organizationId, acc.clientId, business);
+        if (
+          acc.businessId !== business.businessId
+          || acc.businessName !== business.businessName
+          || acc.businessManagerId !== manager.id
+        ) {
+          await prisma.metaAdAccount.update({
+            where: { id: acc.id },
+            data: {
+              businessId: business.businessId,
+              businessName: business.businessName,
+              businessManagerId: manager.id,
+            },
+          });
+        }
       }
+
+      if (period?.businessId && business?.businessId && business.businessId !== period.businessId) continue;
 
       const metaAccountId = acc.accountId.startsWith('act_') ? acc.accountId : `act_${acc.accountId}`;
       const campaignMap = new Map<string, string>();
@@ -273,7 +324,28 @@ export async function runSync(
       where: { id: job.id },
       data: { status: 'success', finishedAt: new Date(), recordsProcessed: processed },
     });
-    return { jobId: job.id, processed, accounts: accounts.length, since: period?.fullHistory ? earliestImported : since, until, fullHistory: Boolean(period?.fullHistory) };
+
+    if (clientId && period?.businessId) {
+      await prisma.businessManager.updateMany({
+        where: { organizationId, clientId, metaBusinessId: period.businessId },
+        data: {
+          connectionStatus: 'connected',
+          lastSyncAt: new Date(),
+          ...(jobType === 'history' ? { lastHistorySyncAt: new Date() } : {}),
+          lastError: null,
+        },
+      });
+    }
+
+    return {
+      jobId: job.id,
+      processed,
+      accounts: accounts.length,
+      businessId: period?.businessId ?? null,
+      since: period?.fullHistory ? earliestImported : since,
+      until,
+      fullHistory: Boolean(period?.fullHistory),
+    };
   } catch (error: any) {
     await prisma.syncJob.update({
       where: { id: job.id },
@@ -283,6 +355,13 @@ export async function runSync(
         errorMessage: error?.message ?? 'Erro de sincronização',
       },
     });
+
+    if (clientId && period?.businessId) {
+      await prisma.businessManager.updateMany({
+        where: { organizationId, clientId, metaBusinessId: period.businessId },
+        data: { lastError: error?.message ?? 'Erro de sincronização', connectionStatus: 'error' },
+      });
+    }
     throw error;
   }
 }
