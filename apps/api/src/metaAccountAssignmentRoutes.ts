@@ -10,7 +10,7 @@ const assignmentSchema = z.object({ isAssigned: z.boolean() });
 export async function registerMetaAccountAssignmentRoutes(app: FastifyInstance) {
   app.get('/meta/account-assignment-capability', async () => ok({
     enabled: true,
-    version: '2026.08.29.1',
+    version: '2026.08.30.1',
     methods: ['POST'],
   }));
 
