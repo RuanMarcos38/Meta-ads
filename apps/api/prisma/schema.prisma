@@ -22,6 +22,25 @@ enum InsightLevel {
   ad
 }
 
+enum SupportConversationType {
+  CHAT
+  TICKET
+}
+
+enum SupportConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum SupportMessageKind {
+  TEXT
+  FILE
+  AUDIO
+  SYSTEM
+}
+
 model Organization {
   id        String   @id @default(uuid())
   name      String
@@ -255,6 +274,54 @@ model Alert {
   message        String
   isRead         Boolean  @default(false)
   createdAt      DateTime @default(now())
+}
+
+model SupportConversation {
+  id            String                    @id @default(uuid())
+  organizationId String
+  clientId      String?
+  createdById   String
+  assignedToId  String?
+  type          SupportConversationType   @default(CHAT)
+  status        SupportConversationStatus @default(OPEN)
+  subject       String?
+  priority      String                    @default("normal")
+  lastMessageAt DateTime                  @default(now())
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  messages      SupportMessage[]
+
+  @@index([organizationId, lastMessageAt])
+  @@index([organizationId, clientId, lastMessageAt])
+  @@index([createdById, lastMessageAt])
+}
+
+model SupportMessage {
+  id               String             @id @default(uuid())
+  conversationId   String
+  conversation     SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId         String
+  kind             SupportMessageKind @default(TEXT)
+  body             String?
+  attachmentName   String?
+  attachmentMime   String?
+  attachmentSize   Int?
+  attachmentData   Bytes?
+  createdAt        DateTime           @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, createdAt])
+}
+
+model SupportPresence {
+  userId         String   @id
+  organizationId String
+  clientId       String?
+  lastSeenAt     DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, lastSeenAt])
+  @@index([clientId, lastSeenAt])
 }
 
 model AuditLog {
