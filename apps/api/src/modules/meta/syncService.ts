@@ -4,18 +4,32 @@ import { MetaAdsService, type MetaBusinessRef, type MetaInsightLevel } from './M
 import { mapMetaActions, mapMetaActionValues } from './metaActions.js';
 import dayjs from 'dayjs';
 
-export type SyncJobType = 'manual' | 'automatic' | 'oauth';
-export type SyncPeriod = { since?: string; until?: string };
+export type SyncJobType = 'manual' | 'automatic' | 'oauth' | 'history';
+export type SyncPeriod = { since?: string; until?: string; fullHistory?: boolean };
 
 function resolvePeriod(jobType: SyncJobType, period?: SyncPeriod) {
   const until = period?.until && dayjs(period.until).isValid() ? dayjs(period.until) : dayjs();
   const defaultDays = jobType === 'automatic' ? 3 : 30;
-  const since = period?.since && dayjs(period.since).isValid() ? dayjs(period.since) : until.subtract(defaultDays, 'day');
+  const since = period?.fullHistory
+    ? dayjs('2010-01-01')
+    : period?.since && dayjs(period.since).isValid()
+      ? dayjs(period.since)
+      : until.subtract(defaultDays, 'day');
   const boundedSince = since.isAfter(until) ? until : since;
   return {
     since: boundedSince.format('YYYY-MM-DD'),
     until: until.format('YYYY-MM-DD'),
   };
+}
+
+function earliestCampaignDate(campaigns: any[], fallback: string) {
+  let earliest: string | null = null;
+  for (const campaign of campaigns) {
+    if (!campaign?.start_time || !dayjs(campaign.start_time).isValid()) continue;
+    const candidate = dayjs(campaign.start_time).format('YYYY-MM-DD');
+    if (!earliest || candidate < earliest) earliest = candidate;
+  }
+  return earliest && earliest < fallback ? earliest : fallback;
 }
 
 export async function runSync(
@@ -45,6 +59,7 @@ export async function runSync(
     let processed = 0;
     const { since, until } = resolvePeriod(jobType, period);
     const businessMaps = new Map<string, Map<string, MetaBusinessRef>>();
+    let earliestImported = until;
 
     for (const acc of accounts) {
       if (acc.connection.organizationId !== organizationId) {
@@ -188,9 +203,12 @@ export async function runSync(
         });
       }
 
+      const accountSince = period?.fullHistory ? earliestCampaignDate(campaigns, since) : since;
+      if (accountSince < earliestImported) earliestImported = accountSince;
+
       const levels: MetaInsightLevel[] = ['campaign', 'adset', 'ad'];
       for (const level of levels) {
-        const insights = await meta.insights(metaAccountId, since, until, level);
+        const insights = await meta.insights(metaAccountId, accountSince, until, level);
         for (const insight of insights) {
           const mapped = mapMetaActions(insight.actions);
           const values = mapMetaActionValues(insight.action_values);
@@ -255,7 +273,7 @@ export async function runSync(
       where: { id: job.id },
       data: { status: 'success', finishedAt: new Date(), recordsProcessed: processed },
     });
-    return { jobId: job.id, processed, accounts: accounts.length, since, until };
+    return { jobId: job.id, processed, accounts: accounts.length, since: period?.fullHistory ? earliestImported : since, until, fullHistory: Boolean(period?.fullHistory) };
   } catch (error: any) {
     await prisma.syncJob.update({
       where: { id: job.id },
