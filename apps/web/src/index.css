@@ -4,8 +4,8 @@
 
 :root {
   color-scheme: light;
-  font-family: "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-  background: #f4f6f4;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  background: #f2f4f2;
   color: #17231d;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -18,19 +18,19 @@
 }
 
 html {
-  background: #f4f6f4;
+  background: #f2f4f2;
 }
 
 body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background: #f4f6f4;
+  background: #f2f4f2;
   color: #17231d;
-  font-family: "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-  font-size: 14px;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
   line-height: 1.45;
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
 }
 
 h1,
@@ -39,6 +39,14 @@ h3,
 h4,
 p {
   margin-top: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+strong {
+  text-wrap: balance;
 }
 
 button,
@@ -53,12 +61,18 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+input::placeholder,
+textarea::placeholder {
+  color: #94a09a;
+  opacity: 1;
+}
+
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid rgba(23, 104, 70, 0.24);
+  outline: 2px solid rgba(23, 104, 70, 0.22);
   outline-offset: 2px;
 }
 
@@ -77,8 +91,8 @@ textarea:focus-visible {
 }
 
 .premium-scrollbar::-webkit-scrollbar {
-  height: 8px;
-  width: 8px;
+  height: 7px;
+  width: 7px;
 }
 
 .premium-scrollbar::-webkit-scrollbar-track {
