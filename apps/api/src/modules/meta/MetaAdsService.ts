@@ -65,6 +65,7 @@ export type MetaCampaignObjective =
   | 'OUTCOME_SALES';
 
 export type MetaSpecialAdCategory = 'HOUSING' | 'EMPLOYMENT' | 'CREDIT' | 'ISSUES_ELECTIONS_POLITICS';
+export type MetaInsightLevel = 'campaign' | 'adset' | 'ad';
 
 export type MetaBusinessRef = {
   businessId: string;
@@ -234,6 +235,22 @@ export class MetaAdsService {
     });
   }
 
+  adSets(actId: string) {
+    return getPaged(`${BASE()}/${actId}/adsets`, {
+      access_token: this.accessToken,
+      fields: 'id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event',
+      limit: '500',
+    });
+  }
+
+  ads(actId: string) {
+    return getPaged(`${BASE()}/${actId}/ads`, {
+      access_token: this.accessToken,
+      fields: 'id,name,campaign_id,adset_id,status,effective_status,creative{id}',
+      limit: '500',
+    });
+  }
+
   createCampaign(actId: string, input: {
     name: string;
     objective: MetaCampaignObjective;
@@ -259,13 +276,19 @@ export class MetaAdsService {
     return postForm<{ success?: boolean }>(`${BASE()}/${campaignId}`, this.accessToken, { status });
   }
 
-  insights(actId: string, since: string, until: string, level = 'campaign') {
+  insights(actId: string, since: string, until: string, level: MetaInsightLevel = 'campaign') {
+    const hierarchyFields = level === 'ad'
+      ? 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name'
+      : level === 'adset'
+        ? 'campaign_id,campaign_name,adset_id,adset_name'
+        : 'campaign_id,campaign_name';
+
     return getPaged(`${BASE()}/${actId}/insights`, {
       access_token: this.accessToken,
       level,
       time_range: JSON.stringify({ since, until }),
       time_increment: '1',
-      fields: 'campaign_id,campaign_name,spend,impressions,reach,frequency,cpm,ctr,cpc,clicks,inline_link_clicks,actions,cost_per_action_type,date_start',
+      fields: `${hierarchyFields},spend,impressions,reach,frequency,cpm,ctr,cpc,clicks,inline_link_clicks,actions,action_values,cost_per_action_type,date_start`,
       limit: '500',
     });
   }
