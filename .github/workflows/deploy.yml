@@ -21,7 +21,7 @@ jobs:
       EASYPANEL_WEBHOOK_URL: ${{ secrets.EASYPANEL_WEBHOOK_URL }}
       API_URL: https://api-gestao.r2rmarketingdigital.com.br
       FRONTEND_ORIGIN: https://gestao.r2rmarketingdigital.com.br
-      EXPECTED_RELEASE: 2026.08.29.1
+      EXPECTED_RELEASE: 2026.08.30.1
       TEST_ACCOUNT_UUID: e5d248a9-5dc1-486f-b1c8-0158c0f4a1d5
     steps:
       - name: Resolve EasyPanel deployment trigger
