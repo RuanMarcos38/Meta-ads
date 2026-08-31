@@ -48,7 +48,7 @@ const CAMPAIGN_STATUS: Record<string, { label: string; severity: StatusSeverity 
 function currencyDivisor(currency?: string | null) {
   if (!currency) return 100;
   try {
-    const digits = new Intl.NumberFormat('en-US', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits;
+    const digits = new Intl.NumberFormat('en-US', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits ?? 2;
     return 10 ** digits;
   } catch {
     return 100;
