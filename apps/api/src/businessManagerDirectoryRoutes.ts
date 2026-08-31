@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from './shared/prisma.js';
 import { requireAuth, type AuthUser } from './shared/auth.js';
@@ -154,7 +155,7 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
         userId: user.id,
         action: 'IMPORT_BUSINESS_DIRECTORY_FROM_META',
         entity: 'BusinessManager',
-        metadataJson: { results },
+        metadataJson: { results } as Prisma.InputJsonValue,
       },
     });
 
