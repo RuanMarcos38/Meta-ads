@@ -156,6 +156,17 @@ const directUrl = databaseUrlWithSchema(preferredDirectUrl, databaseSchema, conf
 if (databaseUrl) process.env.DATABASE_URL = databaseUrl;
 if (directUrl) process.env.DIRECT_URL = directUrl;
 
+// Compatibilidade: algumas instalações já usam GOOGLE_OAUTH_* no EasyPanel.
+// Preserve os nomes atuais e exponha aliases para o módulo Google Analytics.
+const googleOAuthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || '';
+const googleOAuthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || '';
+if (!process.env.GOOGLE_ANALYTICS_CLIENT_ID?.trim() && googleOAuthClientId) {
+  process.env.GOOGLE_ANALYTICS_CLIENT_ID = googleOAuthClientId;
+}
+if (!process.env.GOOGLE_ANALYTICS_CLIENT_SECRET?.trim() && googleOAuthClientSecret) {
+  process.env.GOOGLE_ANALYTICS_CLIENT_SECRET = googleOAuthClientSecret;
+}
+
 const configuredJwtSecret = process.env.JWT_SECRET?.trim() || '';
 const configuredJwtRefreshSecret = process.env.JWT_REFRESH_SECRET?.trim() || '';
 const encryptionKey = process.env.ENCRYPTION_KEY?.trim() || '';
