@@ -49,6 +49,16 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .tab-button{display:inline-flex;min-height:34px;align-items:center;gap:6px;border:0;border-bottom:2px solid transparent;background:transparent;padding:7px 10px;font-size:10px;font-weight:650;color:#758079}.tab-button:hover{color:#17231d}.tab-active{border-bottom-color:#2563eb;color:#2563eb}
 .notification-dot{position:absolute;right:5px;top:5px;height:6px;width:6px;border:1px solid #fff;border-radius:50%;background:#df3d3d}
 
+/* Compatibilidade visual: componentes antigos que ainda carregam tokens verdes de marca são convertidos para a paleta azul R2R sem alterar cores semânticas de sucesso/erro. */
+[class~="text-[#176846]"]{color:#2563eb!important}
+[class~="bg-[#176846]"]{background-color:#2563eb!important}
+[class~="border-[#176846]"]{border-color:#2563eb!important}
+[class~="text-[#143f32]"]{color:#1e3a8a!important}
+[class~="bg-[#edf4ef]"],[class~="bg-[#eef4f0]"],[class~="bg-[#f2f7f4]"]{background-color:#eff6ff!important}
+[class~="border-[#91b19f]"]{border-color:#93c5fd!important}
+.recharts-wrapper [stroke="#176846"]{stroke:#2563eb!important}
+.recharts-wrapper [fill="#176846"]{fill:#2563eb!important}
+
 @supports(height:100dvh){body,#root,.app-viewport{min-height:100dvh}}
 @media(min-width:640px){.page-heading{flex-direction:row;align-items:flex-start;justify-content:space-between}.metric-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(min-width:1280px){.metric-grid{grid-template-columns:repeat(8,minmax(0,1fr))}}
