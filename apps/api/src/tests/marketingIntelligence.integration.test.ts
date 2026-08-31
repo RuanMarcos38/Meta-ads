@@ -76,14 +76,13 @@ suite('Marketing intelligence integration flow', () => {
     expect(response.json().error.code).toBe('META_NOT_CONNECTED');
   });
 
-  it('mantém Pixel vazio quando não há integração Meta em vez de criar dados fictícios', async () => {
+  it('impede consultar Pixel de BM que não pertence à empresa', async () => {
     const response = await app.inject({
       method: 'GET',
       url: `/workspace/meta-pixels?clientId=${clientId}&businessId=123456789`,
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(response.statusCode).toBe(200);
-    expect(response.json().data.configured).toBe(false);
-    expect(response.json().data.pixels).toEqual([]);
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('BUSINESS_NOT_FOUND');
   });
 });
