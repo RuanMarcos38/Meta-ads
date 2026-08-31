@@ -8,7 +8,7 @@ import { runSync } from './modules/meta/syncService.js';
 
 const paramsSchema = z.object({ id: z.string().uuid() });
 const assignmentSchema = z.object({ isAssigned: z.boolean() });
-const RELEASE_VERSION = '2026.08.31.1';
+const RELEASE_VERSION = '2026.08.31.2';
 
 async function assignmentHandler(req: FastifyRequest, reply: FastifyReply) {
   const user = req.user as AuthUser;
