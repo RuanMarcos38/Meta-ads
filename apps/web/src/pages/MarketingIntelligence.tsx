@@ -16,7 +16,7 @@ function isoDate(date:Date){return date.toISOString().slice(0,10);}
 function defaultSince(){const d=new Date();d.setDate(d.getDate()-29);return isoDate(d);}
 function displayDate(value?:string|null){if(!value)return '—';const text=String(value);if(/^\d{8}$/.test(text))return `${text.slice(6,8)}/${text.slice(4,6)}/${text.slice(0,4)}`;const d=new Date(text);return Number.isNaN(d.getTime())?text:d.toLocaleDateString('pt-BR');}
 function money(value:number,currency='BRL'){try{return new Intl.NumberFormat('pt-BR',{style:'currency',currency}).format(value||0);}catch{return String(value||0);}}
-function metaMoney(value:unknown,currency='BRL'){const n=Number(value);if(!Number.isFinite(n))return '—';let digits=2;try{digits=new Intl.NumberFormat('pt-BR',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;}catch{}return money(n/Math.pow(10,digits),currency);}
+function metaMoney(value:unknown,currency='BRL'){const n=Number(value);if(!Number.isFinite(n))return '—';let digits=2;try{digits=new Intl.NumberFormat('pt-BR',{style:'currency',currency}).resolvedOptions().maximumFractionDigits??2;}catch{}return money(n/Math.pow(10,digits),currency);}
 
 export default function MarketingIntelligence(){
  const user=useAuth(s=>s.user);const scope=useScope();const canAdmin=['SUPER_ADMIN','AGENCY_ADMIN'].includes(user?.role||'');
