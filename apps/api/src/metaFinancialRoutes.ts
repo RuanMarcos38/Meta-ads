@@ -73,7 +73,7 @@ async function getPagedGraph(path: string, token: string, params: Record<string,
   let requestParams: Record<string, unknown> | undefined = { ...params, access_token: token };
   let pages = 0;
   while (next && pages < 10) {
-    const response = await axios.get(next, { params: requestParams, timeout: 20_000 });
+    const response: any = await axios.get(next, { params: requestParams, timeout: 20_000 });
     rows.push(...(response.data?.data || []));
     next = response.data?.paging?.next || null;
     requestParams = undefined;
