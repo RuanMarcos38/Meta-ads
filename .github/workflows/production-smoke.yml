@@ -57,7 +57,7 @@ jobs:
       - name: Check Meta account authorization backend
         env:
           API_URL: https://api-gestao.r2rmarketingdigital.com.br
-          EXPECTED_RELEASE: 2026.08.30.2
+          EXPECTED_RELEASE: 2026.08.31.2
         run: |
           set -euo pipefail
           for attempt in $(seq 1 30); do
