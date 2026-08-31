@@ -11,7 +11,7 @@ import BusinessManagers from './pages/BusinessManagers';
 import AdAccounts from './pages/AdAccounts';
 import Reports from './pages/Reports';
 import Alerts from './pages/Alerts';
-import Support from './pages/Support';
+import Support from './pages/SupportPro';
 import UsersAccess from './pages/UsersAccess';
 import Integrations from './pages/Integrations';
 import Audit from './pages/Audit';
