@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
+import { prisma } from '../shared/prisma.js';
+import { hashPassword } from '../shared/password.js';
 
 const integrationEnabled = process.env.RUN_INTEGRATION_TESTS === 'true';
 const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@r2rmarketingdigital.com.br';
@@ -12,6 +14,10 @@ suite('internal support flow', () => {
   let token = '';
   let conversationId = '';
   let attachmentMessageId = '';
+  let sameCompanyTokenA = '';
+  let sameCompanyTokenB = '';
+  let otherCompanyUserId = '';
+  let sameCompanyUserBId = '';
 
   beforeAll(async () => {
     if (!adminPassword) throw new Error('SEED_ADMIN_PASSWORD é obrigatória para o teste de suporte.');
@@ -24,6 +30,39 @@ suite('internal support flow', () => {
     });
     expect(login.statusCode).toBe(200);
     token = login.json().data.token;
+
+    const admin = await prisma.user.findUnique({ where: { email: adminEmail } });
+    if (!admin?.organizationId) throw new Error('Administrador sem organização no teste.');
+
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const companyA = await prisma.client.create({ data: { organizationId: admin.organizationId, name: `Empresa A ${suffix}` } });
+    const companyB = await prisma.client.create({ data: { organizationId: admin.organizationId, name: `Empresa B ${suffix}` } });
+    const password = 'SupportTest123!';
+    const passwordHash = await hashPassword(password);
+
+    const userA = await prisma.user.create({
+      data: { organizationId: admin.organizationId, clientId: companyA.id, name: 'Usuário A', email: `support-a-${suffix}@test.local`, passwordHash, role: 'CLIENT', isActive: true },
+    });
+    const userB = await prisma.user.create({
+      data: { organizationId: admin.organizationId, clientId: companyA.id, name: 'Usuário B', email: `support-b-${suffix}@test.local`, passwordHash, role: 'CLIENT', isActive: true },
+    });
+    const userC = await prisma.user.create({
+      data: { organizationId: admin.organizationId, clientId: companyB.id, name: 'Usuário C', email: `support-c-${suffix}@test.local`, passwordHash, role: 'CLIENT', isActive: true },
+    });
+    sameCompanyUserBId = userB.id;
+    otherCompanyUserId = userC.id;
+
+    const loginA = await app.inject({ method: 'POST', url: '/auth/login', payload: { email: userA.email, password } });
+    const loginB = await app.inject({ method: 'POST', url: '/auth/login', payload: { email: userB.email, password } });
+    expect(loginA.statusCode).toBe(200);
+    expect(loginB.statusCode).toBe(200);
+    sameCompanyTokenA = loginA.json().data.token;
+    sameCompanyTokenB = loginB.json().data.token;
+
+    await app.inject({ method: 'POST', url: '/support/presence', headers: { authorization: `Bearer ${sameCompanyTokenA}` } });
+    await app.inject({ method: 'POST', url: '/support/presence', headers: { authorization: `Bearer ${sameCompanyTokenB}` } });
+    const loginC = await app.inject({ method: 'POST', url: '/auth/login', payload: { email: userC.email, password } });
+    await app.inject({ method: 'POST', url: '/support/presence', headers: { authorization: `Bearer ${loginC.json().data.token}` } });
   });
 
   afterAll(async () => {
@@ -46,6 +85,42 @@ suite('internal support flow', () => {
     });
     expect(presence.statusCode).toBe(200);
     expect(presence.json().data.some((item: { email: string }) => item.email === adminEmail)).toBe(true);
+  });
+
+  it('mostra usuários da mesma empresa e bloqueia outra empresa', async () => {
+    const presence = await app.inject({
+      method: 'GET',
+      url: '/support/presence',
+      headers: { authorization: `Bearer ${sameCompanyTokenA}` },
+    });
+    expect(presence.statusCode).toBe(200);
+    const visibleIds = presence.json().data.map((item: { id: string }) => item.id);
+    expect(visibleIds).toContain(sameCompanyUserBId);
+    expect(visibleIds).not.toContain(otherCompanyUserId);
+
+    const sameCompanyChat = await app.inject({
+      method: 'POST',
+      url: '/support/conversations',
+      headers: { authorization: `Bearer ${sameCompanyTokenA}` },
+      payload: { type: 'CHAT', recipientUserId: sameCompanyUserBId },
+    });
+    expect(sameCompanyChat.statusCode).toBe(200);
+
+    const recipientList = await app.inject({
+      method: 'GET',
+      url: '/support/conversations',
+      headers: { authorization: `Bearer ${sameCompanyTokenB}` },
+    });
+    expect(recipientList.statusCode).toBe(200);
+    expect(recipientList.json().data.some((item: { id: string }) => item.id === sameCompanyChat.json().data.id)).toBe(true);
+
+    const crossCompany = await app.inject({
+      method: 'POST',
+      url: '/support/conversations',
+      headers: { authorization: `Bearer ${sameCompanyTokenA}` },
+      payload: { type: 'CHAT', recipientUserId: otherCompanyUserId },
+    });
+    expect(crossCompany.statusCode).toBe(403);
   });
 
   it('abre uma conversa interna e mantém histórico', async () => {
