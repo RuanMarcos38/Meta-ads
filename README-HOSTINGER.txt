@@ -92,13 +92,41 @@ DEMO_MODE=false
 META_APP_ID=
 META_APP_SECRET=
 META_REDIRECT_URI=https://api-gestao.r2rmarketingdigital.com.br/meta/oauth/callback
-META_API_VERSION=v21.0
+META_API_VERSION=v25.0
+
+GOOGLE_ANALYTICS_CLIENT_ID=<CLIENT_ID_DO_OAUTH_WEB>
+GOOGLE_ANALYTICS_CLIENT_SECRET=<CLIENT_SECRET_DO_OAUTH_WEB>
+GOOGLE_ANALYTICS_REDIRECT_URI=https://api-gestao.r2rmarketingdigital.com.br/google-analytics/oauth/callback
 
 Gerar ENCRYPTION_KEY:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 Gerar JWT_SECRET e JWT_REFRESH_SECRET separadamente. Nunca reutilizar as chaves do CRM.
 Caso a senha do Supabase tenha caracteres especiais, codifique-os para URL.
+
+============================================================
+4.1 GOOGLE CLOUD CONSOLE / GOOGLE ANALYTICS
+============================================================
+
+No Google Cloud Console, use o mesmo projeto que vai emitir o OAuth da ferramenta.
+
+APIs obrigatorias:
+- Google Analytics Admin API
+- Google Analytics Data API
+
+OAuth:
+1. Configure a tela de consentimento OAuth.
+2. Adicione o escopo:
+   https://www.googleapis.com/auth/analytics.readonly
+3. Crie uma credencial OAuth Client ID do tipo Web application.
+4. Em Authorized redirect URIs, cadastre exatamente:
+   https://api-gestao.r2rmarketingdigital.com.br/google-analytics/oauth/callback
+5. Copie Client ID e Client Secret para GOOGLE_ANALYTICS_CLIENT_ID e
+   GOOGLE_ANALYTICS_CLIENT_SECRET no EasyPanel.
+
+Se o app estiver em modo Testing no Google, inclua o e-mail usado para conectar
+o Google Analytics como Test user. A conta Google conectada precisa ter acesso
+a propriedade GA4 que sera selecionada dentro do painel.
 
 ============================================================
 5. PRIMEIRO ADMINISTRADOR

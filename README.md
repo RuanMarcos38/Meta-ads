@@ -82,9 +82,24 @@ JWT_REFRESH_SECRET=<OUTRA_CHAVE_FORTE>
 ENCRYPTION_KEY=<64_CARACTERES_HEXADECIMAIS>
 CORS_ORIGINS=https://gestao.r2rmarketingdigital.com.br
 DEMO_MODE=false
+GOOGLE_ANALYTICS_CLIENT_ID=<CLIENT_ID_DO_OAUTH_WEB>
+GOOGLE_ANALYTICS_CLIENT_SECRET=<CLIENT_SECRET_DO_OAUTH_WEB>
+GOOGLE_ANALYTICS_REDIRECT_URI=https://api-gestao.r2rmarketingdigital.com.br/google-analytics/oauth/callback
 ```
 
 Nunca reutilize secrets de outros projetos e nunca envie um arquivo `.env` real ao GitHub.
+
+## Google Analytics GA4
+
+Para habilitar a tela Google Analytics da ferramenta em produção, configure no Google Cloud Console:
+
+- APIs ativas: Google Analytics Admin API e Google Analytics Data API.
+- OAuth Client ID: tipo Web application.
+- Authorized redirect URI: `https://api-gestao.r2rmarketingdigital.com.br/google-analytics/oauth/callback`.
+- Escopo OAuth: `https://www.googleapis.com/auth/analytics.readonly`.
+- Se o app estiver em Testing, adicione como Test user o e-mail Google que fará a conexão.
+
+Depois, copie o Client ID e o Client Secret para as variáveis `GOOGLE_ANALYTICS_CLIENT_ID` e `GOOGLE_ANALYTICS_CLIENT_SECRET` no EasyPanel, faça o redeploy da API e conecte a propriedade GA4 pela tela Google Analytics do painel.
 
 ## Primeiro administrador
 
