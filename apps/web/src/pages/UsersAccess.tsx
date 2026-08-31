@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useAuth, useScope } from '../store';
 
 type AccessUser={id:string;name:string;email:string;role:string;clientId?:string|null;businessId?:string|null;isActive:boolean;mustChangePassword?:boolean;lastLoginAt?:string|null;createdAt?:string};
+type BusinessOption={id:string;clientId:string;metaBusinessId:string;name:string;status?:string|null};
 
 export default function UsersAccess(){
  const auth=useAuth(s=>s.user);
@@ -13,6 +14,8 @@ export default function UsersAccess(){
  const[loading,setLoading]=useState(false);
  const[saving,setSaving]=useState(false);
  const[companySaving,setCompanySaving]=useState(false);
+ const[businessLoading,setBusinessLoading]=useState(false);
+ const[companyBusinesses,setCompanyBusinesses]=useState<BusinessOption[]>([]);
  const[deletingId,setDeletingId]=useState('');
  const[error,setError]=useState('');
  const[success,setSuccess]=useState('');
@@ -40,7 +43,53 @@ export default function UsersAccess(){
  }
  useEffect(()=>{void load();},[scope.clientId]);
 
- const businessOptions=useMemo(()=>scope.businesses.filter(b=>b.clientId===clientId),[scope.businesses,clientId]);
+ async function loadBusinessOptions(targetClientId:string,refreshWhenEmpty=true){
+  if(!targetClientId){setCompanyBusinesses([]);setBusinessLoading(false);return;}
+  setBusinessLoading(true);
+  try{
+   const fetchPersisted=async()=>{
+    const r=await api.get('/workspace/business-managers',{params:{clientId:targetClientId}});
+    return (Array.isArray(r.data?.data)?r.data.data:[]).filter((item:any)=>item?.clientId===targetClientId&&item?.metaBusinessId) as BusinessOption[];
+   };
+   let options=await fetchPersisted();
+   if(!options.length&&isAdmin&&refreshWhenEmpty){
+    try{
+     await api.post('/workspace/business-managers/import-from-meta',{clientId:targetClientId});
+     window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
+     options=await fetchPersisted();
+    }catch(refreshError:any){
+     const fallback=scope.businesses.filter(b=>b.clientId===targetClientId) as BusinessOption[];
+     if(fallback.length)options=fallback;
+     else{
+      const message=refreshError?.response?.data?.error?.message||refreshError?.response?.data?.message||'';
+      if(message&&!/meta não conectada/i.test(message))setError(message);
+     }
+    }
+   }
+   if(!options.length)options=scope.businesses.filter(b=>b.clientId===targetClientId) as BusinessOption[];
+   const unique=new Map<string,BusinessOption>();
+   options.filter(item=>item.status!=='inactive').forEach(item=>unique.set(item.metaBusinessId,item));
+   const normalized=Array.from(unique.values()).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+   setCompanyBusinesses(normalized);
+   setBusinessId(current=>normalized.some(item=>item.metaBusinessId===current)?current:'');
+  }catch(e:any){
+   const fallback=scope.businesses.filter(b=>b.clientId===targetClientId) as BusinessOption[];
+   setCompanyBusinesses(fallback);
+   if(!fallback.length)setError(e?.response?.data?.error?.message||'Não foi possível carregar as Business Managers desta empresa.');
+  }finally{setBusinessLoading(false);}
+ }
+
+ useEffect(()=>{
+  if(role==='AGENCY_ADMIN'||!clientId){setCompanyBusinesses([]);return;}
+  void loadBusinessOptions(clientId);
+ },[clientId,role]);
+
+ const businessOptions=useMemo(()=>{
+  const unique=new Map<string,BusinessOption>();
+  companyBusinesses.forEach(item=>unique.set(item.metaBusinessId,item));
+  scope.businesses.filter(b=>b.clientId===clientId&&b.status!=='inactive').forEach(item=>unique.set(item.metaBusinessId,item));
+  return Array.from(unique.values()).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+ },[companyBusinesses,scope.businesses,clientId]);
 
  async function createCompany(e:React.FormEvent){
   e.preventDefault();
@@ -76,7 +125,7 @@ export default function UsersAccess(){
  async function remove(row:AccessUser){if(row.id===auth?.id)return;const confirmed=window.confirm(`Excluir definitivamente o usuário ${row.name} (${row.email})?\n\nO acesso será removido, mas registros de auditoria e histórico de atendimento serão preservados.`);if(!confirmed)return;setDeletingId(row.id);setError('');setSuccess('');try{await api.delete(`/workspace/users/${row.id}`);setSuccess('Usuário excluído.');await load();}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível excluir o usuário.');}finally{setDeletingId('');}}
 
  return <div className="space-y-4">
-  <section className="page-heading"><div><p className="section-kicker">Segurança</p><h1>Usuários e acessos</h1><p>Cadastre empresas e mantenha cada Cliente/Gestor vinculado à empresa e à Business Manager correta.</p></div><button className="secondary-button" onClick={()=>{void load();}} disabled={loading}><RefreshCw size={14} className={loading?'animate-spin':''}/>Atualizar</button></section>
+  <section className="page-heading"><div><p className="section-kicker">Segurança</p><h1>Usuários e acessos</h1><p>Cadastre empresas e mantenha cada Cliente/Gestor vinculado à empresa e à Business Manager correta.</p></div><button className="secondary-button" onClick={()=>{void load();if(clientId&&role!=='AGENCY_ADMIN')void loadBusinessOptions(clientId,true);}} disabled={loading||businessLoading}><RefreshCw size={14} className={loading||businessLoading?'animate-spin':''}/>Atualizar</button></section>
   {error&&<div className="message-warning">{error}</div>}
   {success&&<div className="rounded-[8px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">{success}</div>}
 
@@ -91,8 +140,8 @@ export default function UsersAccess(){
    <div className="mt-3 flex justify-end"><button className="primary-button" disabled={companySaving||!companyName.trim()}><Plus size={14}/>{companySaving?'Cadastrando':'Cadastrar empresa'}</button></div>
   </form>}
 
-  {isAdmin&&<form onSubmit={create} className="filter-panel"><div className="mb-3 flex items-center gap-2"><UserPlus size={15} className="text-[#2563eb]"/><div><h2 className="panel-title">Novo acesso</h2><p className="panel-subtitle">Cliente e Gestor obrigatoriamente recebem Empresa + BM. O cadastro existente foi preservado.</p></div></div><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6"><label className="field-label">Nome<input className="field-control" value={name} onChange={e=>setName(e.target.value)} required/></label><label className="field-label">E-mail<input className="field-control" type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label className="field-label">Senha temporária<input className="field-control" type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={10} required/></label><label className="field-label">Perfil<select className="field-control" value={role} onChange={e=>setRole(e.target.value as any)}><option value="CLIENT">Cliente</option><option value="MANAGER">Gestor</option><option value="AGENCY_ADMIN">Administrador da agência</option></select></label><label className="field-label">Empresa<select className="field-control" value={clientId} disabled={role==='AGENCY_ADMIN'} onChange={e=>{setClientId(e.target.value);setBusinessId('');}}><option value="">Selecione</option>{scope.clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="field-label">Business Manager<select className="field-control" value={businessId} disabled={role==='AGENCY_ADMIN'||!clientId} onChange={e=>setBusinessId(e.target.value)}><option value="">Selecione</option>{businessOptions.map(b=><option key={b.id} value={b.metaBusinessId}>{b.name}</option>)}</select></label></div><div className="mt-3 flex justify-end"><button className="primary-button" disabled={saving||(['CLIENT','MANAGER'].includes(role)&&(!clientId||!businessId))}><UserPlus size={14}/>{saving?'Criando':'Criar acesso'}</button></div></form>}
+  {isAdmin&&<form onSubmit={create} className="filter-panel"><div className="mb-3 flex items-center gap-2"><UserPlus size={15} className="text-[#2563eb]"/><div><h2 className="panel-title">Novo acesso</h2><p className="panel-subtitle">Cliente e Gestor obrigatoriamente recebem Empresa + BM. O cadastro existente foi preservado.</p></div></div><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6"><label className="field-label">Nome<input className="field-control" value={name} onChange={e=>setName(e.target.value)} required/></label><label className="field-label">E-mail<input className="field-control" type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label className="field-label">Senha temporária<input className="field-control" type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={10} required/></label><label className="field-label">Perfil<select className="field-control" value={role} onChange={e=>setRole(e.target.value as any)}><option value="CLIENT">Cliente</option><option value="MANAGER">Gestor</option><option value="AGENCY_ADMIN">Administrador da agência</option></select></label><label className="field-label">Empresa<select className="field-control" value={clientId} disabled={role==='AGENCY_ADMIN'} onChange={e=>{setClientId(e.target.value);setBusinessId('');}}><option value="">Selecione</option>{scope.clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="field-label">Business Manager<select className="field-control" value={businessId} disabled={role==='AGENCY_ADMIN'||!clientId||businessLoading} onChange={e=>setBusinessId(e.target.value)}><option value="">{businessLoading?'Carregando BMs...':businessOptions.length?'Selecione':'Nenhuma BM vinculada'}</option>{businessOptions.map(b=><option key={b.id} value={b.metaBusinessId}>{b.name}</option>)}</select></label></div><div className="mt-3 flex justify-end"><button className="primary-button" disabled={saving||businessLoading||(['CLIENT','MANAGER'].includes(role)&&(!clientId||!businessId))}><UserPlus size={14}/>{saving?'Criando':'Criar acesso'}</button></div></form>}
 
-  <section className="corporate-card overflow-hidden"><div className="table-scroll"><table className="corporate-table"><thead><tr><th>Usuário</th><th>Perfil</th><th>Empresa</th><th>BM</th><th>Status</th><th>Último login</th><th>Ações</th></tr></thead><tbody>{rows.map(row=>{const client=scope.clients.find(c=>c.id===row.clientId);const bm=scope.businesses.find(b=>b.clientId===row.clientId&&b.metaBusinessId===row.businessId);return <tr key={row.id}><td><strong>{row.name}</strong><small>{row.email}</small></td><td><span className="status-chip status-neutral"><Shield size={11}/>{row.role}</span></td><td>{client?.name||'Agência'}</td><td>{bm?.name||row.businessId||'Todas'}</td><td><span className={`status-chip ${row.isActive?'status-success':'status-neutral'}`}>{row.isActive?'Ativo':'Inativo'}</span></td><td>{row.lastLoginAt?new Date(row.lastLoginAt).toLocaleString('pt-BR'):'Nunca'}</td><td>{isAdmin&&<div className="flex flex-wrap gap-1"><button className="secondary-button" onClick={()=>{void toggle(row);}}>{row.isActive?'Desativar':'Ativar'}</button><button className="icon-button" title="Redefinir senha" onClick={()=>{void reset(row);}}><KeyRound size={13}/></button>{row.id!==auth?.id&&<button className="icon-button text-red-600" title="Excluir usuário" disabled={deletingId===row.id} onClick={()=>{void remove(row);}}><Trash2 size={13}/></button>}</div>}</td></tr>})}{!rows.length&&!loading&&<tr><td colSpan={7}><div className="empty-state"><Users size={20}/><span>Nenhum usuário neste escopo.</span></div></td></tr>}</tbody></table></div></section>
+  <section className="corporate-card overflow-hidden"><div className="table-scroll"><table className="corporate-table"><thead><tr><th>Usuário</th><th>Perfil</th><th>Empresa</th><th>BM</th><th>Status</th><th>Último login</th><th>Ações</th></tr></thead><tbody>{rows.map(row=>{const client=scope.clients.find(c=>c.id===row.clientId);const bm=[...companyBusinesses,...scope.businesses].find(b=>b.clientId===row.clientId&&b.metaBusinessId===row.businessId);return <tr key={row.id}><td><strong>{row.name}</strong><small>{row.email}</small></td><td><span className="status-chip status-neutral"><Shield size={11}/>{row.role}</span></td><td>{client?.name||'Agência'}</td><td>{bm?.name||row.businessId||'Todas'}</td><td><span className={`status-chip ${row.isActive?'status-success':'status-neutral'}`}>{row.isActive?'Ativo':'Inativo'}</span></td><td>{row.lastLoginAt?new Date(row.lastLoginAt).toLocaleString('pt-BR'):'Nunca'}</td><td>{isAdmin&&<div className="flex flex-wrap gap-1"><button className="secondary-button" onClick={()=>{void toggle(row);}}>{row.isActive?'Desativar':'Ativar'}</button><button className="icon-button" title="Redefinir senha" onClick={()=>{void reset(row);}}><KeyRound size={13}/></button>{row.id!==auth?.id&&<button className="icon-button text-red-600" title="Excluir usuário" disabled={deletingId===row.id} onClick={()=>{void remove(row);}}><Trash2 size={13}/></button>}</div>}</td></tr>})}{!rows.length&&!loading&&<tr><td colSpan={7}><div className="empty-state"><Users size={20}/><span>Nenhum usuário neste escopo.</span></div></td></tr>}</tbody></table></div></section>
  </div>;
 }
