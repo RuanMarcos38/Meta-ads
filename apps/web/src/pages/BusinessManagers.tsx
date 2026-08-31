@@ -34,7 +34,7 @@ export default function BusinessManagers() {
   async function refresh() {
     setRefreshing(true); setError('');
     try {
-      await api.post('/workspace/business-managers/refresh', { ...(scope.clientId ? { clientId: scope.clientId } : {}) });
+      await api.post('/workspace/business-managers/import-from-meta', { ...(scope.clientId ? { clientId: scope.clientId } : {}) });
       window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
       await load();
     } catch (e: any) { setError(e?.response?.data?.error?.message || 'Não foi possível atualizar as BMs pela Meta.'); }
