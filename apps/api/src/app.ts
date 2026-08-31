@@ -18,6 +18,7 @@ import { registerSupportRoutes } from './supportRoutes.js';
 import { registerWorkspaceRoutes } from './workspaceRoutes.js';
 import { registerBreakdownRoutes } from './breakdownRoutes.js';
 import { registerTenantIsolation } from './tenantIsolation.js';
+import { registerDestructiveAdminRoutes } from './destructiveAdminRoutes.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -50,5 +51,6 @@ export async function buildApp() {
   await registerBreakdownRoutes(app);
   await registerSupportRoutes(app);
   await registerWorkspaceRoutes(app);
+  await registerDestructiveAdminRoutes(app);
   return app;
 }
