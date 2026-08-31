@@ -36,7 +36,7 @@ export default function GlobalScopeBar() {
     setError('');
     try {
       if (isAdmin) {
-        await api.post('/workspace/business-managers/refresh', {
+        await api.post('/workspace/business-managers/import-from-meta', {
           ...(scope.clientId ? { clientId: scope.clientId } : {}),
         });
       }
