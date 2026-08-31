@@ -9,11 +9,60 @@ import { MetaAdsService, type MetaBusinessDirectoryItem } from './modules/meta/M
 
 const adminRoles = ['SUPER_ADMIN', 'AGENCY_ADMIN'] as const;
 
+type DirectoryConnectionCandidate = {
+  id: string;
+  clientId: string | null;
+  metaUserId: string | null;
+  accessTokenEncrypted: string;
+  tokenExpiresAt: Date | null;
+  scopes: string | null;
+  updatedAt: Date;
+};
+
+type DirectoryConnectionResolution =
+  | { connection: DirectoryConnectionCandidate; source: 'client' | 'organization'; sourceClientId: string | null }
+  | { connection: null; source: 'none' | 'ambiguous'; sourceClientId: null };
+
 function preferredEmail(business: MetaBusinessDirectoryItem) {
   return business.admins.find((item) => item.email)?.email
     || business.users.find((item) => item.email)?.email
     || business.pendingUsers.find((item) => item.email)?.email
     || null;
+}
+
+export function chooseDirectoryConnection(
+  clientId: string,
+  candidates: DirectoryConnectionCandidate[],
+): DirectoryConnectionResolution {
+  const sorted = [...candidates].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  const own = sorted.find((item) => item.clientId === clientId);
+  if (own) return { connection: own, source: 'client', sourceClientId: own.clientId };
+
+  if (!sorted.length) return { connection: null, source: 'none', sourceClientId: null };
+
+  const metaUsers = new Set(sorted.map((item) => String(item.metaUserId || '').trim()).filter(Boolean));
+  const canShareSafely = metaUsers.size === 1 || (metaUsers.size === 0 && sorted.length === 1);
+  if (!canShareSafely) return { connection: null, source: 'ambiguous', sourceClientId: null };
+
+  const shared = sorted[0];
+  return { connection: shared, source: 'organization', sourceClientId: shared.clientId };
+}
+
+async function resolveDirectoryConnection(organizationId: string, clientId: string) {
+  const candidates = await prisma.metaConnection.findMany({
+    where: { organizationId, status: 'active' },
+    select: {
+      id: true,
+      clientId: true,
+      metaUserId: true,
+      accessTokenEncrypted: true,
+      tokenExpiresAt: true,
+      scopes: true,
+      updatedAt: true,
+    },
+    orderBy: { updatedAt: 'desc' },
+  });
+  return chooseDirectoryConnection(clientId, candidates);
 }
 
 export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstance) {
@@ -34,13 +83,23 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
     const results: Array<Record<string, unknown>> = [];
 
     for (const client of clients) {
-      const connection = await prisma.metaConnection.findFirst({
-        where: { organizationId: user.organizationId!, clientId: client.id, status: 'active' },
-        orderBy: { updatedAt: 'desc' },
-      });
+      const resolution = await resolveDirectoryConnection(user.organizationId!, client.id);
+      const connection = resolution.connection;
 
       if (!connection) {
-        results.push({ clientId: client.id, name: client.name, ok: false, businesses: 0, createdAccounts: 0, updatedAccounts: 0, error: 'Meta não conectada para esta empresa.' });
+        const error = resolution.source === 'ambiguous'
+          ? 'Existem diferentes usuários Meta conectados nesta organização. Conecte a Meta diretamente a esta empresa para listar apenas as BMs corretas.'
+          : 'Nenhuma conexão Meta ativa foi encontrada. Conecte a Meta em Integrações e tente novamente.';
+        results.push({
+          clientId: client.id,
+          name: client.name,
+          ok: false,
+          businesses: 0,
+          createdAccounts: 0,
+          updatedAccounts: 0,
+          connectionSource: resolution.source,
+          error,
+        });
         continue;
       }
 
@@ -138,6 +197,8 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
           mappedAccounts,
           createdAccounts,
           updatedAccounts,
+          connectionSource: resolution.source,
+          sourceClientId: resolution.sourceClientId,
         });
       } catch (error: any) {
         const message = error?.response?.data?.error?.message || error?.message || 'Falha ao consultar Business Managers na Meta.';
@@ -145,7 +206,17 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
           where: { organizationId: user.organizationId!, clientId: client.id },
           data: { lastError: message },
         });
-        results.push({ clientId: client.id, name: client.name, ok: false, businesses: 0, createdAccounts: 0, updatedAccounts: 0, error: message });
+        results.push({
+          clientId: client.id,
+          name: client.name,
+          ok: false,
+          businesses: 0,
+          createdAccounts: 0,
+          updatedAccounts: 0,
+          connectionSource: resolution.source,
+          sourceClientId: resolution.sourceClientId,
+          error: message,
+        });
       }
     }
 
@@ -161,7 +232,8 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
 
     const successCount = results.filter((item) => item.ok === true).length;
     if (!successCount && results.length) {
-      return reply.code(502).send(fail('META_BUSINESS_DIRECTORY_FAILED', 'Não foi possível consultar as Business Managers na Meta.', { results }));
+      const firstError = String(results.find((item) => item.error)?.error || 'Não foi possível consultar as Business Managers na Meta.');
+      return reply.code(502).send(fail('META_BUSINESS_DIRECTORY_FAILED', firstError, { results }));
     }
 
     return ok(results, 'Business Managers e contas Meta atualizadas pelo Gerenciador de Anúncios.');
