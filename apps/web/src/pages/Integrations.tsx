@@ -3,14 +3,232 @@ import { CheckCircle2, ExternalLink, Link2, RefreshCw, ShieldAlert, Unplug, Wren
 import { api } from '../api';
 import { useAuth, useScope } from '../store';
 
-type Health={id:string;clientId:string;clientName:string;businessId:string;businessName:string;adminEmail?:string|null;connected:boolean;tokenStatus:string;tokenExpiresAt?:string|null;scopes?:string;accountCount:number;assignedAccountCount:number;lastSyncAt?:string|null;lastSyncStatus:string;recordsProcessed:number;lastError?:string|null;earliestDate?:string|null;latestDate?:string|null};
-export default function Integrations(){
- const user=useAuth(s=>s.user);const scope=useScope();const canAdmin=['SUPER_ADMIN','AGENCY_ADMIN'].includes(user?.role||'');const[rows,setRows]=useState<Health[]>([]);const[loading,setLoading]=useState(false);const[error,setError]=useState('');const[action,setAction]=useState('');
- async function load(){setLoading(true);try{const r=await api.get('/workspace/integration-health',{params:{...(scope.clientId?{clientId:scope.clientId}:{}),...(scope.businessId?{businessId:scope.businessId}:{})}});setRows(Array.isArray(r.data?.data)?r.data.data:[]);}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível carregar o estado da integração.');}finally{setLoading(false);}}
- useEffect(()=>{void load();},[scope.clientId,scope.businessId]);
- async function connect(clientId:string){setAction(clientId);setError('');const popup=window.open('about:blank','gestao-ads-meta-oauth','width=760,height=860');try{const r=await api.get('/meta/oauth/start-management',{params:{clientId}});const url=r.data?.data?.authUrl;if(!url)throw new Error('URL OAuth ausente');if(popup)popup.location.href=url;else window.location.assign(url);const timer=window.setInterval(async()=>{if(popup?.closed){clearInterval(timer);setAction('');window.dispatchEvent(new Event('gestao-ads:scope-refresh'));await load();}},1000);}catch(e:any){popup?.close();setAction('');setError(e?.response?.data?.error?.message||'Não foi possível iniciar a conexão com a Meta.');}}
- async function disconnect(clientId:string){if(!window.confirm('Desconectar a Meta desta empresa? O histórico será preservado.'))return;setAction(clientId);try{await api.post('/meta/client-disconnect',{clientId});window.dispatchEvent(new Event('gestao-ads:scope-refresh'));await load();}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível desconectar a Meta.');}finally{setAction('');}}
- async function refreshDirectory(){setAction('refresh');try{await api.post('/workspace/business-managers/refresh',{...(scope.clientId?{clientId:scope.clientId}:{})});window.dispatchEvent(new Event('gestao-ads:scope-refresh'));await load();}catch(e:any){const message=e?.response?.data?.error?.message||'Não foi possível atualizar as BMs.';setError(String(message).includes('Application request limit')?'A Meta atingiu o limite temporário de requisições (#4). A conexão existente foi preservada. Aguarde a liberação da Meta antes de clicar novamente em Atualizar BMs.':message);}finally{setAction('');}}
- const clients=scope.clientId?scope.clients.filter(c=>c.id===scope.clientId):scope.clients;
- return <div className="space-y-4"><section className="page-heading"><div><p className="section-kicker">Configurações</p><h1>Integração Meta</h1><p>Conexão, token, permissões, contas e sincronização ficam concentrados aqui, sem poluir as telas operacionais.</p></div>{canAdmin&&<button className="secondary-button" onClick={()=>{void refreshDirectory();}} disabled={action==='refresh'}><RefreshCw size={14} className={action==='refresh'?'animate-spin':''}/>Atualizar BMs</button>}</section>{error&&<div className="message-warning">{error}</div>}<section className="grid gap-3 lg:grid-cols-2">{clients.map(client=>{const clientRows=rows.filter(r=>r.clientId===client.id);const connected=clientRows.some(r=>r.connected);return <article key={client.id} className="corporate-card p-4"><div className="flex items-start justify-between gap-3"><div><h2 className="text-[14px] font-semibold">{client.name}</h2><p className="panel-subtitle">{clientRows.length} BM(s) mapeada(s)</p></div><span className={`status-chip ${connected?'status-success':'status-neutral'}`}>{connected?<CheckCircle2 size={12}/>:<Unplug size={12}/>} {connected?'Meta conectada':'Meta desconectada'}</span></div><div className="mt-4 space-y-2">{clientRows.map(row=><div key={row.id} className="rounded-[7px] border border-[#e1e6e3] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><strong className="text-[11px]">{row.businessName}</strong><small className="block text-[9px] text-slate-400">BM {row.businessId}</small></div><span className={`status-chip ${row.tokenStatus==='valid'?'status-success':row.tokenStatus==='expiring'?'status-warning':'status-neutral'}`}>Token {row.tokenStatus}</span></div><div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-500"><span>Contas: <b>{row.assignedAccountCount}/{row.accountCount}</b></span><span>Última sync: <b>{row.lastSyncAt?new Date(row.lastSyncAt).toLocaleString('pt-BR'):'—'}</b></span><span>Histórico: <b>{row.earliestDate?new Date(row.earliestDate).toLocaleDateString('pt-BR'):'—'}</b></span><span>Status: <b>{row.lastSyncStatus}</b></span></div>{row.lastError&&<p className="mt-2 text-[10px] text-amber-700">{row.lastError}</p>}</div>)}{!clientRows.length&&<div className="rounded-[7px] bg-[#f5f7f5] p-3 text-[10px] text-slate-500"><Wrench size={14} className="mb-1"/>Conecte a Meta e atualize as BMs para preencher esta estrutura.</div>}</div>{canAdmin&&<div className="mt-4 flex flex-wrap gap-2 border-t border-[#e1e6e3] pt-3"><button className="primary-button" disabled={action===client.id} onClick={()=>{void connect(client.id);}}><Link2 size={13}/>{connected?'Reconectar Meta':'Conectar Meta'}</button>{connected&&<button className="secondary-button text-red-600" disabled={action===client.id} onClick={()=>{void disconnect(client.id);}}><Unplug size={13}/>Desconectar</button>}</div>}</article>})}</section><section className="corporate-card p-4"><div className="flex gap-3"><ShieldAlert size={17} className="mt-0.5 text-[#176846]"/><div><h2 className="panel-title">Detalhes técnicos</h2><p className="panel-subtitle">Exibidos apenas nesta área administrativa.</p><div className="mt-3 grid gap-2 text-[10px] text-slate-500 md:grid-cols-2"><span>API: <strong>https://api-gestao.r2rmarketingdigital.com.br</strong></span><span>Atualização automática: <strong>a cada 5 minutos</strong></span><span>Permissões: <strong>ads_read, ads_management, business_management</strong></span><span>Histórico: <strong>preservado ao desconectar</strong></span></div><p className="mt-3 text-[9px] leading-4 text-slate-500">Em caso de limite temporário da Meta (#4), a ferramenta preserva a autorização e evita novas tentativas automáticas. Use “Atualizar BMs” somente depois que a quota da Meta normalizar.</p><a className="mt-3 inline-flex items-center gap-1 text-[10px] font-semibold text-[#176846]" href="https://business.facebook.com/" target="_blank" rel="noreferrer">Abrir Gerenciador da Meta <ExternalLink size={11}/></a></div></div></section></div>;
+type Health = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  businessId: string;
+  businessName: string;
+  adminEmail?: string | null;
+  connected: boolean;
+  tokenStatus: string;
+  tokenExpiresAt?: string | null;
+  scopes?: string;
+  accountCount: number;
+  assignedAccountCount: number;
+  lastSyncAt?: string | null;
+  lastSyncStatus: string;
+  recordsProcessed: number;
+  lastError?: string | null;
+  earliestDate?: string | null;
+  latestDate?: string | null;
+};
+
+type RefreshResult = {
+  clientId?: string;
+  name?: string;
+  businesses?: number;
+  mappedAccounts?: number;
+  ok?: boolean;
+  error?: string;
+};
+
+const META_RATE_LIMIT_NOTICE = 'A Meta atingiu o limite temporário de requisições (#4). A conexão e o token continuam válidos, e os dados já sincronizados foram preservados. Aguarde a liberação da Meta antes de atualizar novamente.';
+
+function isMetaRateLimitMessage(value: unknown) {
+  const message = String(value || '').toLowerCase();
+  return message.includes('application request limit reached')
+    || message.includes('(#4)')
+    || message.includes('request limit')
+    || message.includes('rate limit');
+}
+
+function friendlyMetaError(value: unknown) {
+  if (!value) return '';
+  return isMetaRateLimitMessage(value)
+    ? 'Limite temporário da Meta (#4). Conexão preservada; tente sincronizar novamente mais tarde.'
+    : String(value);
+}
+
+export default function Integrations() {
+  const user = useAuth((s) => s.user);
+  const scope = useScope();
+  const canAdmin = ['SUPER_ADMIN', 'AGENCY_ADMIN'].includes(user?.role || '');
+  const [rows, setRows] = useState<Health[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [action, setAction] = useState('');
+
+  async function load() {
+    setLoading(true);
+    try {
+      const r = await api.get('/workspace/integration-health', {
+        params: {
+          ...(scope.clientId ? { clientId: scope.clientId } : {}),
+          ...(scope.businessId ? { businessId: scope.businessId } : {}),
+        },
+      });
+      setRows(Array.isArray(r.data?.data) ? r.data.data : []);
+    } catch (e: any) {
+      setError(e?.response?.data?.error?.message || 'Não foi possível carregar o estado da integração.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, [scope.clientId, scope.businessId]);
+
+  async function connect(clientId: string) {
+    setAction(clientId);
+    setError('');
+    const popup = window.open('about:blank', 'gestao-ads-meta-oauth', 'width=760,height=860');
+    try {
+      const r = await api.get('/meta/oauth/start-management', { params: { clientId } });
+      const url = r.data?.data?.authUrl;
+      if (!url) throw new Error('URL OAuth ausente');
+      if (popup) popup.location.href = url;
+      else window.location.assign(url);
+      const timer = window.setInterval(async () => {
+        if (popup?.closed) {
+          clearInterval(timer);
+          setAction('');
+          window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
+          await load();
+        }
+      }, 1000);
+    } catch (e: any) {
+      popup?.close();
+      setAction('');
+      setError(e?.response?.data?.error?.message || 'Não foi possível iniciar a conexão com a Meta.');
+    }
+  }
+
+  async function disconnect(clientId: string) {
+    if (!window.confirm('Desconectar a Meta desta empresa? O histórico será preservado.')) return;
+    setAction(clientId);
+    setError('');
+    try {
+      await api.post('/meta/client-disconnect', { clientId });
+      window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.error?.message || 'Não foi possível desconectar a Meta.');
+    } finally {
+      setAction('');
+    }
+  }
+
+  async function refreshDirectory() {
+    setAction('refresh');
+    setError('');
+    try {
+      const response = await api.post('/workspace/business-managers/refresh', {
+        ...(scope.clientId ? { clientId: scope.clientId } : {}),
+      });
+      const results: RefreshResult[] = Array.isArray(response.data?.data) ? response.data.data : [];
+      const failures = results.filter((item) => item.ok === false);
+      if (failures.some((item) => isMetaRateLimitMessage(item.error))) {
+        setError(META_RATE_LIMIT_NOTICE);
+      } else if (failures.length) {
+        setError(failures.map((item) => `${item.name || 'Empresa'}: ${item.error || 'Falha ao consultar a Meta.'}`).join(' | '));
+      }
+      window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
+      await load();
+    } catch (e: any) {
+      const message = e?.response?.data?.error?.message || 'Não foi possível atualizar as BMs.';
+      setError(isMetaRateLimitMessage(message) ? META_RATE_LIMIT_NOTICE : message);
+    } finally {
+      setAction('');
+    }
+  }
+
+  const clients = scope.clientId ? scope.clients.filter((c) => c.id === scope.clientId) : scope.clients;
+
+  return <div className="space-y-4">
+    <section className="page-heading">
+      <div>
+        <p className="section-kicker">Configurações</p>
+        <h1>Integração Meta</h1>
+        <p>Conexão, token, permissões, contas e sincronização ficam concentrados aqui, sem poluir as telas operacionais.</p>
+      </div>
+      {canAdmin && <button className="secondary-button" onClick={() => { void refreshDirectory(); }} disabled={action === 'refresh'}>
+        <RefreshCw size={14} className={action === 'refresh' ? 'animate-spin' : ''} />Atualizar BMs
+      </button>}
+    </section>
+
+    {error && <div className="message-warning">{error}</div>}
+
+    <section className="grid gap-3 lg:grid-cols-2">
+      {clients.map((client) => {
+        const clientRows = rows.filter((r) => r.clientId === client.id);
+        const connected = clientRows.some((r) => r.connected);
+        return <article key={client.id} className="corporate-card p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[14px] font-semibold">{client.name}</h2>
+              <p className="panel-subtitle">{clientRows.length} BM(s) mapeada(s)</p>
+            </div>
+            <span className={`status-chip ${connected ? 'status-success' : 'status-neutral'}`}>
+              {connected ? <CheckCircle2 size={12} /> : <Unplug size={12} />} {connected ? 'Meta conectada' : 'Meta desconectada'}
+            </span>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {clientRows.map((row) => <div key={row.id} className="rounded-[7px] border border-[#e1e6e3] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <strong className="text-[11px]">{row.businessName}</strong>
+                  <small className="block text-[9px] text-slate-400">BM {row.businessId}</small>
+                </div>
+                <span className={`status-chip ${row.tokenStatus === 'valid' ? 'status-success' : row.tokenStatus === 'expiring' ? 'status-warning' : 'status-neutral'}`}>
+                  Token {row.tokenStatus}
+                </span>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-500">
+                <span>Contas: <b>{row.assignedAccountCount}/{row.accountCount}</b></span>
+                <span>Última sync: <b>{row.lastSyncAt ? new Date(row.lastSyncAt).toLocaleString('pt-BR') : '—'}</b></span>
+                <span>Histórico: <b>{row.earliestDate ? new Date(row.earliestDate).toLocaleDateString('pt-BR') : '—'}</b></span>
+                <span>Status: <b>{row.lastSyncStatus}</b></span>
+              </div>
+              {row.lastError && <p className="mt-2 text-[10px] text-amber-700">{friendlyMetaError(row.lastError)}</p>}
+            </div>)}
+            {!clientRows.length && <div className="rounded-[7px] bg-[#f5f7f5] p-3 text-[10px] text-slate-500">
+              <Wrench size={14} className="mb-1" />Conecte a Meta e atualize as BMs para preencher esta estrutura.
+            </div>}
+          </div>
+
+          {canAdmin && <div className="mt-4 flex flex-wrap gap-2 border-t border-[#e1e6e3] pt-3">
+            <button className="primary-button" disabled={action === client.id} onClick={() => { void connect(client.id); }}>
+              <Link2 size={13} />{connected ? 'Reconectar Meta' : 'Conectar Meta'}
+            </button>
+            {connected && <button className="secondary-button text-red-600" disabled={action === client.id} onClick={() => { void disconnect(client.id); }}>
+              <Unplug size={13} />Desconectar
+            </button>}
+          </div>}
+        </article>;
+      })}
+    </section>
+
+    <section className="corporate-card p-4">
+      <div className="flex gap-3">
+        <ShieldAlert size={17} className="mt-0.5 text-[#176846]" />
+        <div>
+          <h2 className="panel-title">Detalhes técnicos</h2>
+          <p className="panel-subtitle">Exibidos apenas nesta área administrativa.</p>
+          <div className="mt-3 grid gap-2 text-[10px] text-slate-500 md:grid-cols-2">
+            <span>API: <strong>https://api-gestao.r2rmarketingdigital.com.br</strong></span>
+            <span>Atualização automática: <strong>a cada 5 minutos</strong></span>
+            <span>Permissões: <strong>ads_read, ads_management, business_management</strong></span>
+            <span>Histórico: <strong>preservado ao desconectar</strong></span>
+          </div>
+          <p className="mt-3 text-[9px] leading-4 text-slate-500">Em caso de limite temporário da Meta (#4), a ferramenta mantém a autorização e os dados existentes. Não é necessário reconectar a conta; aguarde a quota normalizar antes de atualizar as BMs novamente.</p>
+          <a className="mt-3 inline-flex items-center gap-1 text-[10px] font-semibold text-[#176846]" href="https://business.facebook.com/" target="_blank" rel="noreferrer">
+            Abrir Gerenciador da Meta <ExternalLink size={11} />
+          </a>
+        </div>
+      </div>
+    </section>
+  </div>;
 }
