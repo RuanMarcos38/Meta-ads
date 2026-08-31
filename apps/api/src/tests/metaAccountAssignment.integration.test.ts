@@ -70,7 +70,7 @@ suite('Meta account assignment compatibility', () => {
     const response = await app.inject({ method: 'GET', url: '/meta/account-assignment-capability' });
     expect(response.statusCode).toBe(200);
     expect(response.json().data.enabled).toBe(true);
-    expect(response.json().data.version).toBe('2026.08.30.2');
+    expect(response.json().data.version).toBe('2026.08.31.1');
   });
 
   it('libera PATCH e POST no preflight CORS da autorização Meta', async () => {
