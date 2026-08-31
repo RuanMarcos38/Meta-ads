@@ -34,6 +34,7 @@ jobs:
         run: npm run build
 
       - name: Create hosting package
+        shell: bash
         run: |
           set -euo pipefail
           rm -rf hosting-package
@@ -46,42 +47,41 @@ jobs:
             --exclude '.env.*.local'
           mkdir -p hosting-package/frontend-public_html
           cp -a apps/web/dist/. hosting-package/frontend-public_html/
-          cat > hosting-package/LEIA-ME-IMPORTACAO.txt <<'EOF'
-R2R GESTAO ADS - PACOTE ATUALIZADO PARA HOSPEDAGEM
-
-Origem: RuanMarcos38/Meta-ads
-Branch base: main
-Commit base: 8fec0e4415477d6dfbf5fb6a400818a8552cfd53
-Data do pacote: 31/08/2026
-
-CONTEUDO
-1) projeto-completo/ -> codigo fonte completo, backend + frontend, ja validado e compilado.
-2) frontend-public_html/ -> arquivos prontos para enviar ao public_html da hospedagem.
-
-FRONTEND HOSTINGER / APACHE
-- Envie TODO o conteudo de frontend-public_html/ para o diretorio publico do dominio.
-- O arquivo .htaccess esta incluido.
-- API configurada para: https://api-gestao.r2rmarketingdigital.com.br
-
-BACKEND EASYPANEL
-- Fonte recomendada: GitHub RuanMarcos38/Meta-ads, branch main.
-- Dockerfile da raiz preservado.
-- Nao substitua credenciais existentes.
-- Configure as variaveis de ambiente da hospedagem usando os mesmos nomes dos arquivos .env.example.
-- Start de producao conforme projeto existente.
-
-ATUALIZACOES INCLUIDAS
-- usuarios online no Atendimento;
-- chat entre administrador e usuarios;
-- chat entre usuarios da mesma empresa;
-- isolamento entre empresas;
-- cadastro de empresa preservando cadastro de usuario;
-- historico e presenca de atendimento;
-- estrutura existente mantida.
-
-SEGURANCA
-Nenhum arquivo .env real, senha, token ou chave privada foi incluido neste pacote.
-EOF
+          printf '%s\n' \
+            'R2R GESTAO ADS - PACOTE ATUALIZADO PARA HOSPEDAGEM' \
+            '' \
+            'Origem: RuanMarcos38/Meta-ads' \
+            'Branch base: main' \
+            'Commit base: 8fec0e4415477d6dfbf5fb6a400818a8552cfd53' \
+            'Data do pacote: 31/08/2026' \
+            '' \
+            'CONTEUDO' \
+            '1) projeto-completo/ -> codigo fonte completo, backend + frontend, validado e compilado.' \
+            '2) frontend-public_html/ -> arquivos prontos para enviar ao public_html da hospedagem.' \
+            '' \
+            'FRONTEND HOSTINGER / APACHE' \
+            '- Envie TODO o conteudo de frontend-public_html/ para o diretorio publico do dominio.' \
+            '- O arquivo .htaccess esta incluido.' \
+            '- API configurada para: https://api-gestao.r2rmarketingdigital.com.br' \
+            '' \
+            'BACKEND EASYPANEL' \
+            '- Fonte recomendada: GitHub RuanMarcos38/Meta-ads, branch main.' \
+            '- Dockerfile da raiz preservado.' \
+            '- Nao substitua credenciais existentes.' \
+            '- Configure as variaveis de ambiente usando os mesmos nomes dos arquivos .env.example.' \
+            '' \
+            'ATUALIZACOES INCLUIDAS' \
+            '- usuarios online no Atendimento;' \
+            '- chat entre administrador e usuarios;' \
+            '- chat entre usuarios da mesma empresa;' \
+            '- isolamento entre empresas;' \
+            '- cadastro de empresa preservando cadastro de usuario;' \
+            '- historico e presenca de atendimento;' \
+            '- estrutura existente mantida.' \
+            '' \
+            'SEGURANCA' \
+            'Nenhum arquivo .env real, senha, token ou chave privada foi incluido neste pacote.' \
+            > hosting-package/LEIA-ME-IMPORTACAO.txt
           cd hosting-package
           zip -qr ../Meta-Ads-R2R-Atualizado-Hospedagem-2026-08-31.zip .
 
