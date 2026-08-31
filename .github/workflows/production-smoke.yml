@@ -57,19 +57,20 @@ jobs:
       - name: Check Meta account authorization backend
         env:
           API_URL: https://api-gestao.r2rmarketingdigital.com.br
-          EXPECTED_RELEASE: 2026.08.31.3
+          EXPECTED_RELEASE: 2026.08.31.4
         run: |
           set -euo pipefail
           for attempt in $(seq 1 30); do
             body="$(curl -fsSL --connect-timeout 10 --max-time 20 "${API_URL}/meta/account-assignment-capability?attempt=${attempt}" 2>/dev/null || true)"
-            if printf '%s' "$body" | jq -e --arg release "$EXPECTED_RELEASE" '.success == true and .data.enabled == true and .data.version == $release and .data.liveBillingAndDeliveryStatus == true' >/dev/null 2>&1; then
-              echo "Backend Meta publicado na versão ${EXPECTED_RELEASE}, incluindo cobrança e status de entrega ao vivo."
+            if printf '%s' "$body" | jq -e --arg release "$EXPECTED_RELEASE" '.success == true and .data.enabled == true and .data.version == $release and .data.liveBillingAndDeliveryStatus == true and .data.collaborativeInternalSupport == true' >/dev/null 2>&1; then
+              echo "Backend publicado na versão ${EXPECTED_RELEASE}, com cobrança/status Meta e Atendimento colaborativo habilitados."
               exit 0
             fi
-            echo "Tentativa ${attempt}/30: backend da nova release Meta ainda não publicado."
+            current_release="$(printf '%s' "$body" | jq -r '.data.version // empty' 2>/dev/null || true)"
+            echo "Tentativa ${attempt}/30: release atual=${current_release:-indisponível}; aguardando backend colaborativo."
             sleep 10
           done
-          echo "O backend da nova release Meta ainda não está publicado no EasyPanel."
+          echo "O backend colaborativo da release ${EXPECTED_RELEASE} ainda não está publicado no EasyPanel."
           exit 1
 
       - name: Check API and database
