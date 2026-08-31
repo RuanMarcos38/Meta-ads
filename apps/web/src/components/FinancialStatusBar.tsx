@@ -46,7 +46,7 @@ const money = (value: unknown, currency = 'BRL') => new Intl.NumberFormat('pt-BR
 function activityDetail(details?: Record<string, unknown> | null) {
   if (!details) return '';
   const entries = Object.entries(details).filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '').slice(0, 4);
-  return entries.map(([key, value]) => `${key.replaceAll('_', ' ')}: ${String(value)}`).join(' · ');
+  return entries.map(([key, value]) => `${key.replace(/_/g, ' ')}: ${String(value)}`).join(' · ');
 }
 
 export default function FinancialStatusBar() {
