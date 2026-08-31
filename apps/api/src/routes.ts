@@ -8,11 +8,11 @@ import { verifyPassword } from './shared/password.js';
 import { encrypt } from './shared/crypto.js';
 import { env } from './config/env.js';
 import { runSync } from './modules/meta/syncService.js';
-import { MetaAdsService } from './modules/meta/MetaAdsService.js';
+import { MetaAdsService, isMetaRateLimitError } from './modules/meta/MetaAdsService.js';
 import { demoSummary, demoCampaigns, demoDaily } from './modules/demo/demoData.js';
 
-const VERSION = '1.3.0';
-const META_OAUTH_SCOPES = ['ads_read', 'business_management'];
+const VERSION = '1.3.1';
+const META_OAUTH_SCOPES = ['ads_read', 'ads_management', 'business_management'];
 const asNumber = (value: unknown) => Number(value ?? 0);
 
 function metaGraphBase() {
@@ -463,9 +463,20 @@ export async function registerRoutes(app: FastifyInstance) {
       const tokenExpiresAt = tokenPayload.expires_in
         ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000)
         : undefined;
-      const me = await axios.get(`${metaGraphBase()}/me`, {
-        params: { fields: 'id,name', access_token: tokenPayload.access_token },
-      });
+
+      let metaUserId: string | null = null;
+      let profileWarning: string | null = null;
+      try {
+        const me = await axios.get(`${metaGraphBase()}/me`, {
+          params: { fields: 'id,name', access_token: tokenPayload.access_token },
+        });
+        metaUserId = me.data?.id ? String(me.data.id) : null;
+      } catch (error: any) {
+        if (Number(error?.response?.data?.error?.code) === 190) throw error;
+        profileWarning = isMetaRateLimitError(error)
+          ? 'A Meta atingiu o limite temporário de requisições; a identificação do usuário será completada na próxima atualização.'
+          : 'A conexão foi salva, mas a identificação do usuário Meta ficou pendente.';
+      }
 
       await prisma.metaConnection.updateMany({
         where: { organizationId: state.organizationId, clientId: state.clientId, status: 'active' },
@@ -475,7 +486,7 @@ export async function registerRoutes(app: FastifyInstance) {
         data: {
           organizationId: state.organizationId,
           clientId: state.clientId,
-          metaUserId: String(me.data.id || ''),
+          metaUserId,
           accessTokenEncrypted: encrypt(tokenPayload.access_token),
           tokenExpiresAt,
           scopes: META_OAUTH_SCOPES.join(','),
@@ -483,36 +494,44 @@ export async function registerRoutes(app: FastifyInstance) {
         },
       });
 
-      const meta = new MetaAdsService(tokenPayload.access_token);
-      const accounts = await meta.adAccounts();
-      for (const account of accounts) {
-        const existing = await prisma.metaAdAccount.findFirst({
-          where: {
-            organizationId: state.organizationId,
-            clientId: state.clientId,
-            accountId: String(account.account_id),
-          },
-        });
-        const data = {
-          name: account.name,
-          currency: account.currency,
-          timezone: account.timezone_name,
-          accountStatus: account.account_status ? Number(account.account_status) : null,
-          connectionId: connection.id,
-          isActive: true,
-        };
-        if (existing) {
-          await prisma.metaAdAccount.update({ where: { id: existing.id }, data });
-        } else {
-          await prisma.metaAdAccount.create({
-            data: {
+      let accounts: any[] = [];
+      let discoveryWarning: string | null = null;
+      try {
+        const meta = new MetaAdsService(tokenPayload.access_token);
+        accounts = await meta.adAccounts();
+        for (const account of accounts) {
+          const existing = await prisma.metaAdAccount.findFirst({
+            where: {
               organizationId: state.organizationId,
               clientId: state.clientId,
               accountId: String(account.account_id),
-              ...data,
             },
           });
+          const data = {
+            name: account.name,
+            currency: account.currency,
+            timezone: account.timezone_name,
+            accountStatus: account.account_status ? Number(account.account_status) : null,
+            connectionId: connection.id,
+            isActive: true,
+          };
+          if (existing) {
+            await prisma.metaAdAccount.update({ where: { id: existing.id }, data });
+          } else {
+            await prisma.metaAdAccount.create({
+              data: {
+                organizationId: state.organizationId,
+                clientId: state.clientId,
+                accountId: String(account.account_id),
+                ...data,
+              },
+            });
+          }
         }
+      } catch (error: any) {
+        discoveryWarning = isMetaRateLimitError(error)
+          ? 'A Meta atingiu o limite temporário de requisições. A autorização foi preservada e as contas/BMs poderão ser atualizadas depois, sem reconectar.'
+          : 'A autorização foi preservada, mas a descoberta de contas ficou pendente para a próxima atualização.';
       }
 
       await prisma.auditLog.create({
@@ -522,18 +541,29 @@ export async function registerRoutes(app: FastifyInstance) {
           action: 'META_CONNECTED',
           entity: 'MetaConnection',
           entityId: connection.id,
-          metadataJson: { accountCount: accounts.length },
+          metadataJson: {
+            accountCount: accounts.length,
+            profilePending: Boolean(profileWarning),
+            discoveryPending: Boolean(discoveryWarning),
+            warning: discoveryWarning || profileWarning || null,
+          },
         },
       });
 
+      const pendingMessage = discoveryWarning || profileWarning;
       return reply.type('text/html').send(htmlPage(
-        'Meta Ads conectado',
-        `Conexão salva com sucesso. Contas de anúncio localizadas: ${accounts.length}. Você já pode voltar ao painel e atualizar os dados.`,
+        pendingMessage ? 'Meta conectada — sincronização pendente' : 'Meta Ads conectado',
+        pendingMessage
+          ? `A autorização foi salva com segurança. ${pendingMessage} Feche esta janela e volte ao painel; não é necessário autorizar novamente.`
+          : `Conexão salva com sucesso. Contas de anúncio localizadas: ${accounts.length}. Você já pode voltar ao painel e atualizar os dados.`,
       ));
-    } catch {
-      return reply.code(400).type('text/html').send(htmlPage(
-        'Falha na conexão Meta',
-        'Não foi possível concluir a autorização. Revise o app no Meta Developers e tente novamente.',
+    } catch (error: any) {
+      const limited = isMetaRateLimitError(error);
+      return reply.code(limited ? 429 : 400).type('text/html').send(htmlPage(
+        limited ? 'Meta temporariamente limitada' : 'Falha na conexão Meta',
+        limited
+          ? 'A própria Meta atingiu o limite temporário de requisições antes de concluir a emissão do token. Aguarde a liberação da quota e tente novamente; nenhuma estrutura do sistema foi alterada.'
+          : 'Não foi possível concluir a autorização. Revise o app no Meta Developers e tente novamente.',
       ));
     }
   });

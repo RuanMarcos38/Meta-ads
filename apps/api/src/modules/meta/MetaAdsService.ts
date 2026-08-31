@@ -3,11 +3,29 @@ import { env } from '../../config/env.js';
 
 const BASE = () => `https://graph.facebook.com/${env.meta.apiVersion}`;
 
+export function metaErrorCode(error: any): number | null {
+  const raw = error?.response?.data?.error?.code ?? error?.response?.data?.error_code ?? null;
+  const code = Number(raw);
+  return Number.isFinite(code) ? code : null;
+}
+
+export function isMetaRateLimitError(error: any): boolean {
+  const code = metaErrorCode(error);
+  const status = Number(error?.response?.status || 0);
+  const message = String(error?.response?.data?.error?.message || error?.message || '').toLowerCase();
+  return status === 429 || [4, 17, 32, 613].includes(code ?? -1) || message.includes('request limit') || message.includes('rate limit');
+}
+
 async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < retries; i++) {
     try { return await fn(); }
-    catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 500 * (i + 1) * (i + 1))); }
+    catch (e) {
+      lastErr = e;
+      // Rate limit não deve gerar novas chamadas imediatas: isso piora a quota do app.
+      if (isMetaRateLimitError(e)) throw e;
+      if (i < retries - 1) await new Promise(r => setTimeout(r, 500 * (i + 1) * (i + 1)));
+    }
   }
   throw lastErr;
 }
@@ -38,7 +56,8 @@ async function getPagedWithFieldFallback(
         fields,
         limit,
       });
-    } catch {
+    } catch (error) {
+      if (isMetaRateLimitError(error)) throw error;
       // Algumas contas/versões da Graph API não expõem todos os campos.
     }
   }
@@ -193,7 +212,8 @@ export class MetaAdsService {
               accountStatus: account?.account_status == null ? null : Number(account.account_status),
             });
           }
-        } catch {
+        } catch (error) {
+          if (isMetaRateLimitError(error)) throw error;
           // Uma BM pode estar visível ao usuário sem liberar um dos edges de contas.
         }
       }

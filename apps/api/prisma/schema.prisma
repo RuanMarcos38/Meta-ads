@@ -142,6 +142,27 @@ model MetaConnection {
   @@index([organizationId, clientId])
 }
 
+model GoogleAnalyticsConnection {
+  id                    String   @id @default(uuid())
+  organizationId        String
+  clientId              String
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  scopes                String?
+  propertyId            String?
+  propertyName          String?
+  status                String   @default("active")
+  lastSyncAt            DateTime?
+  lastError             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([organizationId, clientId])
+  @@index([organizationId, status])
+  @@index([clientId])
+}
+
 model MetaAdAccount {
   id                String           @id @default(uuid())
   organizationId    String
@@ -235,16 +256,16 @@ model InsightDaily {
   clientId             String
   adAccountId          String
   campaignId           String?
-  adSetId               String?
-  adId                  String?
-  level                 InsightLevel
-  date                  DateTime
-  spend                 Decimal      @default(0)
-  impressions           Int          @default(0)
-  reach                 Int          @default(0)
-  frequency             Decimal      @default(0)
-  clicks                Int          @default(0)
-  inlineLinkClicks      Int          @default(0)
+  adSetId              String?
+  adId                 String?
+  level                InsightLevel
+  date                 DateTime
+  spend                Decimal      @default(0)
+  impressions          Int          @default(0)
+  reach                Int          @default(0)
+  frequency            Decimal      @default(0)
+  clicks               Int          @default(0)
+  inlineLinkClicks     Int          @default(0)
   ctr                   Decimal      @default(0)
   cpc                   Decimal      @default(0)
   cpm                   Decimal      @default(0)
@@ -270,9 +291,9 @@ model InsightBreakdownDaily {
   clientId       String
   adAccountId    String
   campaignId     String       @default("")
-  adSetId         String       @default("")
-  adId            String       @default("")
-  level           InsightLevel @default(campaign)
+  adSetId        String       @default("")
+  adId           String       @default("")
+  level          InsightLevel @default(campaign)
   date            DateTime
   breakdownType   String
   breakdownValue  String

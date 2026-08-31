@@ -24,6 +24,7 @@ const groups:MenuGroup[]=[
   ]},
   {label:'Operação',items:[
     {to:'/campanhas',label:'Campanhas',icon:Megaphone},
+    {to:'/google-analytics',label:'Google Analytics',icon:BarChart3},
     {to:'/relatorios',label:'Relatórios',icon:FileText},
     {to:'/alertas',label:'Alertas',icon:Bell},
     {to:'/atendimento',label:'Atendimento',icon:MessageSquareText},

@@ -22,6 +22,7 @@ import { registerDestructiveAdminRoutes } from './destructiveAdminRoutes.js';
 import { registerBusinessManagerDirectoryRoutes } from './businessManagerDirectoryRoutes.js';
 import { registerMetaLiveStatusRoutes } from './metaLiveStatusRoutes.js';
 import { registerClientManagementRoutes } from './clientManagementRoutes.js';
+import { registerGoogleAnalyticsRoutes } from './googleAnalyticsRoutes.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -55,6 +56,7 @@ export async function buildApp() {
   await registerBreakdownRoutes(app);
   await registerSupportRoutes(app);
   await registerWorkspaceRoutes(app);
+  await registerGoogleAnalyticsRoutes(app);
   await registerBusinessManagerDirectoryRoutes(app);
   await registerMetaLiveStatusRoutes(app);
   await registerDestructiveAdminRoutes(app);
