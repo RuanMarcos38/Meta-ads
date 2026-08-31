@@ -86,7 +86,6 @@ function run(label, command, args) {
   if ((result.status ?? 1) === 0) return true;
 
   console.error(`[startup] Falha em: ${label}. Código: ${result.status ?? 1}.`);
-  console.error('[startup] A API continuará subindo para expor /health e facilitar o diagnóstico no EasyPanel.');
   return false;
 }
 
@@ -132,6 +131,12 @@ if (isEnabled(process.env.PRISMA_DB_PUSH, true)) {
     'push',
     '--skip-generate',
   ]);
+}
+
+if (!databasePrepared && isEnabled(process.env.PRISMA_DB_PUSH_STRICT, true)) {
+  console.error('[startup] O schema gestao_ads não está compatível com a versão atual da API.');
+  console.error('[startup] A inicialização foi interrompida para impedir que o frontend receba erros de tabela/coluna inexistente.');
+  process.exit(1);
 }
 
 const seedRequested = isEnabled(process.env.RUN_SEED_ON_START, false);
