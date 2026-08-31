@@ -15,12 +15,13 @@ import { registerMetaBusinessRoutes } from './metaBusinessRoutes.js';
 import { registerMetaAccountAssignmentRoutes } from './metaAccountAssignmentRoutes.js';
 import { registerPerformanceRoutes } from './performanceRoutes.js';
 import { registerSupportRoutes } from './supportRoutes.js';
+import { registerWorkspaceRoutes } from './workspaceRoutes.js';
+import { registerBreakdownRoutes } from './breakdownRoutes.js';
+import { registerTenantIsolation } from './tenantIsolation.js';
 
 export async function buildApp() {
   const app = Fastify({
     logger: true,
-    // Arquivos e áudios do atendimento interno são enviados em JSON/base64.
-    // O limite permanece controlado no endpoint em 8 MB por anexo.
     bodyLimit: 14 * 1024 * 1024,
   });
 
@@ -34,6 +35,7 @@ export async function buildApp() {
   });
   await app.register(jwt, { secret: env.jwtSecret });
   await app.register(rateLimit, { max: 180, timeWindow: '1 minute' });
+  await registerTenantIsolation(app);
 
   await registerDatabaseDiagnostics(app);
   await registerRoutes(app);
@@ -45,6 +47,8 @@ export async function buildApp() {
   await registerMetaBusinessRoutes(app);
   await registerMetaAccountAssignmentRoutes(app);
   await registerPerformanceRoutes(app);
+  await registerBreakdownRoutes(app);
   await registerSupportRoutes(app);
+  await registerWorkspaceRoutes(app);
   return app;
 }
