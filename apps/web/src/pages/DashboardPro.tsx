@@ -13,6 +13,7 @@ type Summary = {
 type Campaign = Summary & { id: string; metaCampaignId: string; name: string; status?: string | null; objective?: string | null; adSetCount?: number; adAccount?: { id: string; name?: string | null; accountId: string; businessName?: string | null } };
 type Daily = { date: string; spend: number; leads: number; conversations: number; purchases: number; revenue: number };
 type Health = { businessId: string; businessName: string; lastSyncAt?: string | null; lastSyncStatus?: string; tokenStatus?: string; earliestDate?: string | null; latestDate?: string | null; assignedAccountCount?: number };
+type PeriodPreset = 'today' | 'today_yesterday' | 'week' | 'month' | 'last_month' | 'custom';
 
 const empty: Summary = { spend: 0, impressions: 0, reach: 0, clicks: 0, inlineLinkClicks: 0, leads: 0, conversations: 0, purchases: 0, revenue: 0, frequency: 0, cpm: 0, ctr: 0, linkCtr: 0, cpc: 0, costPerLead: 0, costPerConversation: 0, costPerPurchase: 0, roas: 0 };
 const num = (v: unknown) => Number.isFinite(Number(v)) ? Number(v) : 0;
@@ -20,8 +21,13 @@ const money = (v: unknown) => num(v).toLocaleString('pt-BR', { style: 'currency'
 const integer = (v: unknown) => Math.round(num(v)).toLocaleString('pt-BR');
 const decimal = (v: unknown) => num(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pct = (v: unknown) => `${decimal(v)}%`;
-const today = () => new Date().toISOString().slice(0, 10);
-const daysAgo = (days: number) => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().slice(0, 10); };
+const iso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const today = () => iso(new Date());
+const monthStart = () => { const d = new Date(); d.setDate(1); return iso(d); };
+const weekStart = () => { const d = new Date(); const diff = (d.getDay() + 6) % 7; d.setDate(d.getDate() - diff); return iso(d); };
+const yesterday = () => { const d = new Date(); d.setDate(d.getDate() - 1); return iso(d); };
+const previousMonth = () => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth() - 1, 1); const end = new Date(now.getFullYear(), now.getMonth(), 0); return { since: iso(start), until: iso(end) }; };
+const br = (value: string) => value.split('-').reverse().join('/');
 
 function Card({ label, value, helper, icon: Icon }: { label: string; value: string; helper: string; icon: typeof WalletCards }) {
   return <article className="corporate-card p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="section-kicker">{label}</p><strong className="mt-2 block tabular-nums text-[22px] tracking-[-0.03em] text-[#142119]">{value}</strong></div><span className="metric-icon"><Icon size={15} /></span></div><p className="mt-2 text-[10px] leading-4 text-slate-500">{helper}</p></article>;
@@ -35,7 +41,8 @@ function delta(current: number, previous: number) {
 
 export default function DashboardPro() {
   const scope = useScope();
-  const [since, setSince] = useState(daysAgo(29));
+  const [period, setPeriod] = useState<PeriodPreset>('month');
+  const [since, setSince] = useState(monthStart());
   const [until, setUntil] = useState(today());
   const [campaignId, setCampaignId] = useState('');
   const [summary, setSummary] = useState<Summary>(empty);
@@ -64,7 +71,7 @@ export default function DashboardPro() {
     const span = Math.max(1, Math.round((b.getTime() - a.getTime()) / 86400000) + 1);
     const end = new Date(a); end.setDate(end.getDate() - 1);
     const start = new Date(end); start.setDate(start.getDate() - span + 1);
-    return { since: start.toISOString().slice(0, 10), until: end.toISOString().slice(0, 10) };
+    return { since: iso(start), until: iso(end) };
   }
 
   async function load(silent = false) {
@@ -114,16 +121,15 @@ export default function DashboardPro() {
     } finally { setSyncing(false); }
   }
 
-  function preset(value: string) {
-    const end = today(); setUntil(end);
-    if (value === 'today') setSince(end);
-    if (value === '7') setSince(daysAgo(6));
-    if (value === '14') setSince(daysAgo(13));
-    if (value === '30') setSince(daysAgo(29));
-    if (value === '90') setSince(daysAgo(89));
-    if (value === 'month') setSince(`${end.slice(0, 8)}01`);
-    if (value === 'year') setSince(`${end.slice(0, 4)}-01-01`);
-    if (value === 'history' && health?.earliestDate) setSince(String(health.earliestDate).slice(0, 10));
+  function applyPeriod(value: PeriodPreset) {
+    setPeriod(value);
+    const end = today();
+    if (value === 'custom') return;
+    if (value === 'today') { setSince(end); setUntil(end); return; }
+    if (value === 'today_yesterday') { setSince(yesterday()); setUntil(end); return; }
+    if (value === 'week') { setSince(weekStart()); setUntil(end); return; }
+    if (value === 'month') { setSince(monthStart()); setUntil(end); return; }
+    const last = previousMonth(); setSince(last.since); setUntil(last.until);
   }
 
   const filtered = campaigns.filter((item) => !search.trim() || [item.name, item.adAccount?.name, item.adAccount?.businessName].some((v) => String(v || '').toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => b.spend - a.spend);
@@ -135,7 +141,7 @@ export default function DashboardPro() {
   return <div className="space-y-4">
     <section className="page-heading"><div><p className="section-kicker">Desempenho</p><h1>Dashboard</h1><p>Resumo da BM e detalhamento por campanha, conta e período. Nenhum resultado de outra empresa entra neste escopo.</p></div><div className="flex flex-wrap items-center gap-2"><span className={`status-chip ${health?.lastSyncStatus === 'success' ? 'status-success' : 'status-neutral'}`}><CheckCircle2 size={12} />{health?.lastSyncAt ? `Atualizado ${new Date(health.lastSyncAt).toLocaleString('pt-BR')}` : 'Aguardando sincronização'}</span><button className="primary-button" disabled={!scope.clientId || syncing} onClick={() => { void sync(); }}><RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Sincronizando' : 'Sincronizar'}</button></div></section>
 
-    <section className="filter-panel"><div className="grid gap-2 md:grid-cols-[180px_1fr_1fr_auto] md:items-end"><label className="field-label">Período<select defaultValue="30" onChange={(e) => preset(e.target.value)} className="field-control"><option value="today">Hoje</option><option value="7">7 dias</option><option value="14">14 dias</option><option value="30">30 dias</option><option value="90">90 dias</option><option value="month">Este mês</option><option value="year">Este ano</option>{health?.earliestDate && <option value="history">Todo histórico</option>}</select></label><label className="field-label"><span><CalendarRange size={12} /> Data inicial</span><input type="date" value={since} max={until} onChange={(e) => setSince(e.target.value)} className="field-control" /></label><label className="field-label"><span><CalendarRange size={12} /> Data final</span><input type="date" value={until} min={since} max={today()} onChange={(e) => setUntil(e.target.value)} className="field-control" /></label><label className="flex h-9 items-center gap-2 rounded-[7px] border border-[#d9e0dc] bg-white px-3 text-[11px] font-medium text-slate-600"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} /> Comparar período anterior</label></div>{selectedCampaign && <div className="mt-3 flex items-center justify-between border-t border-[#e2e7e4] pt-3 text-[11px]"><span>Campanha selecionada: <strong>{selectedCampaign.name}</strong></span><button className="text-button" onClick={() => setCampaignId('')}>Voltar ao resumo</button></div>}</section>
+    <section className="filter-panel"><div className="grid gap-2 md:grid-cols-[220px_1fr_auto] md:items-end"><label className="field-label">Período<select value={period} onChange={(e) => applyPeriod(e.target.value as PeriodPreset)} className="field-control"><option value="today">Hoje</option><option value="today_yesterday">Hoje e ontem</option><option value="week">Esta semana</option><option value="month">Este mês</option><option value="last_month">Mês passado</option><option value="custom">Personalizado</option></select></label>{period === 'custom' ? <div className="grid gap-2 sm:grid-cols-2"><label className="field-label"><span><CalendarRange size={12} /> Data inicial</span><input type="date" value={since} max={until} onChange={(e) => setSince(e.target.value)} className="field-control" /></label><label className="field-label"><span><CalendarRange size={12} /> Data final</span><input type="date" value={until} min={since} max={today()} onChange={(e) => setUntil(e.target.value)} className="field-control" /></label></div> : <div className="rounded-[7px] border border-[#d9e0dc] bg-white px-3 py-2 text-[11px] text-slate-600"><span className="font-semibold text-slate-800">Período aplicado:</span> {br(since)} a {br(until)}</div>}<label className="flex h-9 items-center gap-2 rounded-[7px] border border-[#d9e0dc] bg-white px-3 text-[11px] font-medium text-slate-600"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} /> Comparar período anterior</label></div>{selectedCampaign && <div className="mt-3 flex items-center justify-between border-t border-[#e2e7e4] pt-3 text-[11px]"><span>Campanha selecionada: <strong>{selectedCampaign.name}</strong></span><button className="text-button" onClick={() => setCampaignId('')}>Voltar ao resumo</button></div>}</section>
 
     {error && <div className="message-warning">{error}</div>}
 
