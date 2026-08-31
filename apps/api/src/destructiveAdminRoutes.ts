@@ -151,7 +151,7 @@ export async function registerDestructiveAdminRoutes(app: FastifyInstance) {
         },
       });
       return result;
-    });
+    }, { maxWait: 10_000, timeout: 60_000 });
 
     return ok({ id: client.id, counts }, 'Empresa e dados operacionais vinculados foram excluídos com sucesso.');
   });
