@@ -5,7 +5,7 @@ WORKDIR /app
 RUN apk add --no-cache openssl ca-certificates
 
 COPY apps/api/package*.json ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+RUN npm install
 
 COPY apps/api/prisma ./prisma
 COPY apps/api/tsconfig.json ./tsconfig.json
@@ -32,8 +32,6 @@ COPY --from=build /app/dist ./dist
 
 EXPOSE 3333
 
-# O container deve permanecer saudável mesmo quando o Supabase estiver indisponível.
-# /health continua verificando banco; /live verifica somente se a API está executando.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3333) + '/live').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
