@@ -84,7 +84,7 @@ model Client {
   companyName         String?
   document            String?
   email               String?
-  phone                String?
+  phone               String?
   segment             String?
   status              String            @default("active")
   notes               String?
@@ -348,19 +348,22 @@ model Alert {
 }
 
 model SupportConversation {
-  id             String                    @id @default(uuid())
-  organizationId String
-  clientId       String?
-  createdById    String
-  assignedToId   String?
-  type           SupportConversationType   @default(CHAT)
-  status         SupportConversationStatus @default(OPEN)
-  subject        String?
-  priority       String                    @default("normal")
-  lastMessageAt  DateTime                  @default(now())
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
-  messages       SupportMessage[]
+  id                  String                    @id @default(uuid())
+  organizationId      String
+  clientId            String?
+  createdById         String
+  assignedToId        String?
+  type                SupportConversationType   @default(CHAT)
+  status              SupportConversationStatus @default(OPEN)
+  subject             String?
+  priority            String                    @default("normal")
+  lastMessageAt       DateTime                  @default(now())
+  firstResponseAt     DateTime?
+  lastAdminReadAt     DateTime?
+  lastRequesterReadAt DateTime?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  messages            SupportMessage[]
 
   @@index([organizationId, lastMessageAt])
   @@index([organizationId, clientId, lastMessageAt])
