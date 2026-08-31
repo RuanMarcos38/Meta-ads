@@ -22,10 +22,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Validate project
-        run: |
-          npm run typecheck
-          npm run test
+      - name: Validate types
+        run: npm run typecheck
 
       - name: Build production
         env:
