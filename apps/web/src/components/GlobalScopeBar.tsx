@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Building2, BriefcaseBusiness, CreditCard, RefreshCw } from 'lucide-react';
 import { api } from '../api';
-import { useScope } from '../store';
+import { useAuth, useScope } from '../store';
 
 export default function GlobalScopeBar() {
+  const user = useAuth((state) => state.user);
   const scope = useScope();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const isAdmin = ['SUPER_ADMIN', 'AGENCY_ADMIN'].includes(user?.role || '');
 
   async function load() {
     setLoading(true);
@@ -24,6 +26,32 @@ export default function GlobalScopeBar() {
       });
     } catch (requestError: any) {
       setError(requestError?.response?.data?.error?.message || requestError?.response?.data?.message || 'Não foi possível carregar empresas e BMs.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshFromMeta() {
+    setLoading(true);
+    setError('');
+    try {
+      if (isAdmin) {
+        await api.post('/workspace/business-managers/refresh', {
+          ...(scope.clientId ? { clientId: scope.clientId } : {}),
+        });
+      }
+      const response = await api.get('/workspace/context');
+      const data = response.data?.data || {};
+      scope.setContext({
+        clients: Array.isArray(data.clients) ? data.clients : [],
+        businesses: Array.isArray(data.businesses) ? data.businesses : [],
+        accounts: Array.isArray(data.accounts) ? data.accounts : [],
+        tenantLocked: Boolean(data.tenantLocked),
+        selectedClientId: data.selectedClientId,
+        selectedBusinessId: data.selectedBusinessId,
+      });
+    } catch (requestError: any) {
+      setError(requestError?.response?.data?.error?.message || requestError?.response?.data?.message || 'Não foi possível atualizar as BMs pela Meta.');
     } finally {
       setLoading(false);
     }
@@ -52,7 +80,7 @@ export default function GlobalScopeBar() {
           <label className="relative min-w-0">
             <span className="sr-only">Empresa</span>
             <Building2 size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <select value={scope.clientId} disabled={scope.tenantLocked} onChange={(event) => scope.setClientId(event.target.value)} className="h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none disabled:bg-[#f2f4f2]">
+            <select value={scope.clientId} disabled={scope.tenantLocked} onChange={(event) => scope.setClientId(event.target.value)} className="h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd] disabled:bg-[#f2f4f2]">
               {!scope.clients.length && <option value="">Nenhuma empresa</option>}
               {scope.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
             </select>
@@ -60,7 +88,7 @@ export default function GlobalScopeBar() {
           <label className="relative min-w-0">
             <span className="sr-only">Business Manager</span>
             <BriefcaseBusiness size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <select value={scope.businessId} disabled={scope.tenantLocked} onChange={(event) => scope.setBusinessId(event.target.value)} className="h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none disabled:bg-[#f2f4f2]">
+            <select value={scope.businessId} disabled={scope.tenantLocked} onChange={(event) => scope.setBusinessId(event.target.value)} className="h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd] disabled:bg-[#f2f4f2]">
               {!businesses.length && <option value="">BM não vinculada</option>}
               {!scope.tenantLocked && <option value="">Todas as BMs</option>}
               {businesses.map((business) => <option key={business.id} value={business.metaBusinessId}>{business.name}</option>)}
@@ -69,7 +97,7 @@ export default function GlobalScopeBar() {
           <label className="relative min-w-0">
             <span className="sr-only">Conta de anúncios</span>
             <CreditCard size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <select value={scope.adAccountId} onChange={(event) => scope.setAdAccountId(event.target.value)} className="h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none">
+            <select value={scope.adAccountId} onChange={(event) => scope.setAdAccountId(event.target.value)} className="h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd]">
               <option value="">Todas as contas autorizadas</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}</option>)}
             </select>
@@ -77,7 +105,7 @@ export default function GlobalScopeBar() {
         </div>
         <div className="flex shrink-0 items-center justify-between gap-2 xl:justify-end">
           {error ? <span className="text-[10px] font-medium text-amber-700">{error}</span> : <span className="text-[10px] text-slate-400">Escopo aplicado em toda a plataforma</span>}
-          <button type="button" onClick={() => { void load(); }} disabled={loading} className="grid h-9 w-9 place-items-center rounded-[7px] border border-[#d9e0dc] bg-white text-slate-500 hover:bg-[#f3f6f4] disabled:opacity-50" title="Atualizar empresas e BMs"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
+          <button type="button" onClick={() => { void refreshFromMeta(); }} disabled={loading} className="grid h-9 w-9 place-items-center rounded-[7px] border border-[#d9e0dc] bg-white text-slate-500 hover:border-[#bfdbfe] hover:bg-[#eff6ff] hover:text-[#2563eb] disabled:opacity-50" title={isAdmin ? 'Buscar BMs e contas novamente na Meta' : 'Atualizar empresas e BMs'}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
         </div>
       </div>
     </div>
