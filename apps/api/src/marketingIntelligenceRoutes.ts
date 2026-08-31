@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { Prisma } from '@prisma/client';
 import axios from 'axios';
 import crypto from 'node:crypto';
 import { z } from 'zod';
@@ -14,6 +13,9 @@ const tenantRoles = new Set(['CLIENT', 'MANAGER']);
 const dateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const GA_CONFIG_ACTION = 'MARKETING_GA4_CONFIG';
 const PIXEL_CONFIG_ACTION = 'MARKETING_PIXEL_CONFIG';
+
+type GaConfig = { propertyId: string; serviceAccountEmail: string; privateKeyEncrypted: string };
+type PixelConfig = { pixelId: string; pixelName: string; businessId: string };
 
 function effectiveClientId(user: AuthUser, requested?: string) {
   return scopeClient(user, requested);
@@ -41,6 +43,23 @@ async function requireClient(user: AuthUser, requested: string | undefined, repl
   return client;
 }
 
+async function requireBusiness(user: AuthUser, clientId: string, requested: string | undefined, reply: FastifyReply) {
+  const businessId = effectiveBusinessId(user, requested);
+  if (!businessId || businessId === '__NO_BUSINESS__') {
+    reply.code(400).send(fail('BUSINESS_REQUIRED', 'Selecione uma Business Manager.'));
+    return null;
+  }
+  const manager = await prisma.businessManager.findFirst({
+    where: { organizationId: user.organizationId!, clientId, metaBusinessId: businessId, status: 'active' },
+    select: { id: true, metaBusinessId: true, name: true },
+  });
+  if (!manager) {
+    reply.code(404).send(fail('BUSINESS_NOT_FOUND', 'Business Manager não pertence à empresa selecionada.'));
+    return null;
+  }
+  return manager;
+}
+
 async function activeMetaConnection(organizationId: string, clientId: string) {
   return prisma.metaConnection.findFirst({
     where: { organizationId, clientId, status: 'active' },
@@ -48,29 +67,17 @@ async function activeMetaConnection(organizationId: string, clientId: string) {
   });
 }
 
-function base64url(value: Buffer | string) {
-  const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
-  return source.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-}
-
-type GaConfig = {
-  propertyId: string;
-  serviceAccountEmail: string;
-  privateKeyEncrypted: string;
-};
-
-type PixelConfig = {
-  pixelId: string;
-  pixelName: string;
-  businessId: string;
-};
-
 async function latestConfig<T>(organizationId: string, action: string, entityId: string) {
   const log = await prisma.auditLog.findFirst({
     where: { organizationId, action, entityId },
     orderBy: { createdAt: 'desc' },
   });
-  return log ? { value: (log.metadataJson || {}) as T, createdAt: log.createdAt } : null;
+  return log ? { value: (log.metadataJson ?? {}) as unknown as T, createdAt: log.createdAt } : null;
+}
+
+function base64url(value: Buffer | string) {
+  const source = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  return source.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
 async function googleAccessToken(config: GaConfig) {
@@ -87,8 +94,7 @@ async function googleAccessToken(config: GaConfig) {
   const signer = crypto.createSign('RSA-SHA256');
   signer.update(unsigned);
   signer.end();
-  const signature = signer.sign(decrypt(config.privateKeyEncrypted));
-  const assertion = `${unsigned}.${base64url(signature)}`;
+  const assertion = `${unsigned}.${base64url(signer.sign(decrypt(config.privateKeyEncrypted)))}`;
   const form = new URLSearchParams();
   form.set('grant_type', 'urn:ietf:params:oauth:grant-type:jwt-bearer');
   form.set('assertion', assertion);
@@ -120,38 +126,25 @@ function inPeriod(value: unknown, since: string, until: string) {
   if (!value) return true;
   const time = new Date(String(value)).getTime();
   if (Number.isNaN(time)) return true;
-  const start = new Date(`${since}T00:00:00.000Z`).getTime();
-  const end = new Date(`${until}T23:59:59.999Z`).getTime();
-  return time >= start && time <= end;
+  return time >= new Date(`${since}T00:00:00.000Z`).getTime() && time <= new Date(`${until}T23:59:59.999Z`).getTime();
 }
 
 export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) {
   app.get('/workspace/finance', { preHandler: requireAuth() }, async (req, reply) => {
     const user = req.user as AuthUser;
-    const query = z.object({
-      clientId: z.string().uuid().optional(),
-      businessId: z.string().optional(),
-      adAccountId: z.string().uuid().optional(),
-      since: dateText,
-      until: dateText,
-    }).safeParse(req.query);
+    const query = z.object({ clientId: z.string().uuid().optional(), businessId: z.string().optional(), adAccountId: z.string().uuid().optional(), since: dateText, until: dateText }).safeParse(req.query);
     if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Filtros financeiros inválidos.'));
     if (query.data.since > query.data.until) return reply.code(400).send(fail('VALIDATION', 'O início do período deve ser anterior ao fim.'));
-
     const client = await requireClient(user, query.data.clientId, reply);
     if (!client) return;
     const businessId = effectiveBusinessId(user, query.data.businessId);
     if (tenantRoles.has(user.role) && businessId === '__NO_BUSINESS__') return reply.code(403).send(fail('TENANT_SCOPE_REQUIRED', 'Este usuário precisa estar vinculado a uma BM.'));
-
     const connection = await activeMetaConnection(user.organizationId!, client.id);
     if (!connection) return reply.code(409).send(fail('META_NOT_CONNECTED', 'A Meta não está conectada para esta empresa.'));
 
     const accounts = await prisma.metaAdAccount.findMany({
       where: {
-        organizationId: user.organizationId!,
-        clientId: client.id,
-        isActive: true,
-        isAssigned: true,
+        organizationId: user.organizationId!, clientId: client.id, isActive: true, isAssigned: true,
         ...(businessId && businessId !== '__NO_BUSINESS__' ? { businessId } : {}),
         ...(query.data.adAccountId ? { id: query.data.adAccountId } : {}),
       },
@@ -163,13 +156,10 @@ export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) 
     const result = await Promise.all(accounts.map(async (account) => {
       let financial: any = null;
       let financialError: string | null = null;
-      let transactions: any[] = [];
+      let transactions: ReturnType<typeof normalizeTransaction>[] = [];
       let transactionsError: string | null = null;
-      try {
-        financial = await meta.accountFinance(`act_${account.accountId}`);
-      } catch (error: any) {
-        financialError = error?.response?.data?.error?.message || error?.message || 'Dados financeiros indisponíveis na Meta.';
-      }
+      try { financial = await meta.accountFinance(`act_${account.accountId}`); }
+      catch (error: any) { financialError = error?.response?.data?.error?.message || error?.message || 'Dados financeiros indisponíveis na Meta.'; }
       try {
         const rows = await meta.transactions(`act_${account.accountId}`, query.data.since, query.data.until);
         transactions = rows.map(normalizeTransaction).filter((row) => inPeriod(row.date, query.data.since, query.data.until));
@@ -179,13 +169,9 @@ export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) 
       return {
         ...account,
         finance: financial ? {
-          amountSpent: financial.amount_spent ?? null,
-          balance: financial.balance ?? null,
-          spendCap: financial.spend_cap ?? null,
-          currency: financial.currency || account.currency || null,
-          fundingSource: financial.funding_source || null,
-          fundingSourceDetails: financial.funding_source_details || null,
-          isPrepayAccount: financial.is_prepay_account ?? null,
+          amountSpent: financial.amount_spent ?? null, balance: financial.balance ?? null, spendCap: financial.spend_cap ?? null,
+          currency: financial.currency || account.currency || null, fundingSource: financial.funding_source || null,
+          fundingSourceDetails: financial.funding_source_details || null, isPrepayAccount: financial.is_prepay_account ?? null,
           timezone: financial.timezone_name || null,
         } : null,
         financialError,
@@ -194,7 +180,6 @@ export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) 
         transactions,
       };
     }));
-
     return ok({ client, businessId: businessId === '__NO_BUSINESS__' ? null : businessId, since: query.data.since, until: query.data.until, accounts: result });
   });
 
@@ -205,48 +190,25 @@ export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) 
     const client = await requireClient(user, query.data.clientId, reply);
     if (!client) return;
     const config = await latestConfig<GaConfig>(user.organizationId!, GA_CONFIG_ACTION, client.id);
-    return ok({
-      client,
-      configured: Boolean(config?.value?.propertyId && config?.value?.serviceAccountEmail && config?.value?.privateKeyEncrypted),
-      propertyId: config?.value?.propertyId || null,
-      serviceAccountEmail: config?.value?.serviceAccountEmail || null,
-      updatedAt: config?.createdAt || null,
-    });
+    return ok({ client, configured: Boolean(config?.value?.propertyId && config?.value?.serviceAccountEmail && config?.value?.privateKeyEncrypted), propertyId: config?.value?.propertyId || null, serviceAccountEmail: config?.value?.serviceAccountEmail || null, updatedAt: config?.createdAt || null });
   });
 
   app.put('/workspace/google-analytics/config', { preHandler: requireAuth([...adminRoles]) }, async (req, reply) => {
     const user = req.user as AuthUser;
-    const body = z.object({
-      clientId: z.string().uuid(),
-      propertyId: z.string().min(1),
-      serviceAccountJson: z.string().min(20),
-    }).safeParse(req.body);
+    const body = z.object({ clientId: z.string().uuid(), propertyId: z.string().min(1), serviceAccountJson: z.string().min(20) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Informe empresa, Property ID e JSON da conta de serviço.'));
     const client = await requireClient(user, body.data.clientId, reply);
     if (!client) return;
-
     let credential: any;
     try { credential = JSON.parse(body.data.serviceAccountJson); }
     catch { return reply.code(400).send(fail('GA_CREDENTIAL_INVALID', 'O JSON da conta de serviço não é válido.')); }
     const email = String(credential?.client_email || '').trim();
     const privateKey = String(credential?.private_key || '').replace(/\\n/g, '\n').trim();
     if (!email || !privateKey.includes('PRIVATE KEY')) return reply.code(400).send(fail('GA_CREDENTIAL_INVALID', 'O JSON precisa conter client_email e private_key.'));
-
-    const metadata: GaConfig = {
-      propertyId: body.data.propertyId.replace(/^properties\//, '').trim(),
-      serviceAccountEmail: email,
-      privateKeyEncrypted: encrypt(privateKey),
-    };
-    await prisma.auditLog.create({
-      data: {
-        organizationId: user.organizationId,
-        userId: user.id,
-        action: GA_CONFIG_ACTION,
-        entity: 'GoogleAnalytics4',
-        entityId: client.id,
-        metadataJson: metadata as unknown as Prisma.InputJsonValue,
-      },
-    });
+    try { crypto.createPrivateKey(privateKey); }
+    catch { return reply.code(400).send(fail('GA_CREDENTIAL_INVALID', 'A chave privada da conta de serviço é inválida.')); }
+    const metadata: GaConfig = { propertyId: body.data.propertyId.replace(/^properties\//, '').trim(), serviceAccountEmail: email, privateKeyEncrypted: encrypt(privateKey) };
+    await prisma.auditLog.create({ data: { organizationId: user.organizationId, userId: user.id, action: GA_CONFIG_ACTION, entity: 'GoogleAnalytics4', entityId: client.id, metadataJson: metadata as any } });
     return ok({ clientId: client.id, propertyId: metadata.propertyId, serviceAccountEmail: metadata.serviceAccountEmail }, 'Google Analytics configurado para a empresa.');
   });
 
@@ -259,54 +221,24 @@ export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) 
     if (!client) return;
     const stored = await latestConfig<GaConfig>(user.organizationId!, GA_CONFIG_ACTION, client.id);
     if (!stored?.value?.propertyId) return reply.code(409).send(fail('GA_NOT_CONFIGURED', 'Google Analytics ainda não foi configurado para esta empresa.'));
-
     try {
       const accessToken = await googleAccessToken(stored.value);
       if (!accessToken) throw new Error('Google não retornou token de acesso.');
-      const response = await axios.post(
-        `https://analyticsdata.googleapis.com/v1beta/properties/${encodeURIComponent(stored.value.propertyId)}:runReport`,
-        {
-          dateRanges: [{ startDate: query.data.since, endDate: query.data.until }],
-          dimensions: [{ name: 'date' }],
-          metrics: [
-            { name: 'activeUsers' },
-            { name: 'sessions' },
-            { name: 'screenPageViews' },
-            { name: 'keyEvents' },
-            { name: 'transactions' },
-            { name: 'totalRevenue' },
-          ],
-          orderBys: [{ dimension: { dimensionName: 'date' } }],
-          limit: 10000,
-        },
-        { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 25000 },
-      );
-      const rows = Array.isArray(response.data?.rows) ? response.data.rows : [];
-      const series = rows.map((row: any) => {
-        const date = String(row?.dimensionValues?.[0]?.value || '');
+      const response = await axios.post(`https://analyticsdata.googleapis.com/v1beta/properties/${encodeURIComponent(stored.value.propertyId)}:runReport`, {
+        dateRanges: [{ startDate: query.data.since, endDate: query.data.until }],
+        dimensions: [{ name: 'date' }],
+        metrics: [{ name: 'activeUsers' }, { name: 'sessions' }, { name: 'screenPageViews' }, { name: 'keyEvents' }, { name: 'transactions' }, { name: 'totalRevenue' }],
+        orderBys: [{ dimension: { dimensionName: 'date' } }], limit: 10000,
+      }, { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 25000 });
+      const rows: any[] = Array.isArray(response.data?.rows) ? response.data.rows : [];
+      const series = rows.map((row) => {
         const values = row?.metricValues || [];
-        return {
-          date,
-          activeUsers: numberValue(values[0]?.value),
-          sessions: numberValue(values[1]?.value),
-          pageViews: numberValue(values[2]?.value),
-          keyEvents: numberValue(values[3]?.value),
-          transactions: numberValue(values[4]?.value),
-          revenue: numberValue(values[5]?.value),
-        };
+        return { date: String(row?.dimensionValues?.[0]?.value || ''), activeUsers: numberValue(values[0]?.value), sessions: numberValue(values[1]?.value), pageViews: numberValue(values[2]?.value), keyEvents: numberValue(values[3]?.value), transactions: numberValue(values[4]?.value), revenue: numberValue(values[5]?.value) };
       });
-      const totals = series.reduce((acc, row) => ({
-        activeUsers: acc.activeUsers + row.activeUsers,
-        sessions: acc.sessions + row.sessions,
-        pageViews: acc.pageViews + row.pageViews,
-        keyEvents: acc.keyEvents + row.keyEvents,
-        transactions: acc.transactions + row.transactions,
-        revenue: acc.revenue + row.revenue,
-      }), { activeUsers: 0, sessions: 0, pageViews: 0, keyEvents: 0, transactions: 0, revenue: 0 });
+      const totals = series.reduce((acc, row) => ({ activeUsers: acc.activeUsers + row.activeUsers, sessions: acc.sessions + row.sessions, pageViews: acc.pageViews + row.pageViews, keyEvents: acc.keyEvents + row.keyEvents, transactions: acc.transactions + row.transactions, revenue: acc.revenue + row.revenue }), { activeUsers: 0, sessions: 0, pageViews: 0, keyEvents: 0, transactions: 0, revenue: 0 });
       return ok({ client, propertyId: stored.value.propertyId, since: query.data.since, until: query.data.until, totals, series });
     } catch (error: any) {
-      const message = error?.response?.data?.error?.message || error?.message || 'Falha ao consultar o Google Analytics.';
-      return reply.code(502).send(fail('GA_REPORT_FAILED', message));
+      return reply.code(502).send(fail('GA_REPORT_FAILED', error?.response?.data?.error?.message || error?.message || 'Falha ao consultar o Google Analytics.'));
     }
   });
 
@@ -316,41 +248,26 @@ export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) 
     if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Filtros do Pixel inválidos.'));
     const client = await requireClient(user, query.data.clientId, reply);
     if (!client) return;
-    const businessId = effectiveBusinessId(user, query.data.businessId);
-    if (!businessId || businessId === '__NO_BUSINESS__') return reply.code(400).send(fail('BUSINESS_REQUIRED', 'Selecione uma Business Manager.'));
-
+    const manager = await requireBusiness(user, client.id, query.data.businessId, reply);
+    if (!manager) return;
+    const businessId = manager.metaBusinessId;
     const stored = await latestConfig<PixelConfig>(user.organizationId!, PIXEL_CONFIG_ACTION, `${client.id}:${businessId}`);
     const connection = await activeMetaConnection(user.organizationId!, client.id);
-    let pixels: any[] = [];
-    let error: string | null = null;
+    const pixels = new Map<string, { id: string; name: string; lastFiredTime: string | null }>();
+    let discoveryError: string | null = null;
     if (connection) {
-      const accounts = await prisma.metaAdAccount.findMany({
-        where: { organizationId: user.organizationId!, clientId: client.id, businessId, isActive: true, isAssigned: true },
-        select: { accountId: true },
-      });
+      const accounts = await prisma.metaAdAccount.findMany({ where: { organizationId: user.organizationId!, clientId: client.id, businessId, isActive: true, isAssigned: true }, select: { accountId: true } });
       const meta = new MetaAdsService(decrypt(connection.accessTokenEncrypted));
-      const map = new Map<string, any>();
       for (const account of accounts) {
         try {
           for (const pixel of await meta.adAccountPixels(`act_${account.accountId}`)) {
             const id = String(pixel?.id || '');
-            if (id && !map.has(id)) map.set(id, { id, name: pixel?.name || `Pixel ${id}`, lastFiredTime: pixel?.last_fired_time || null });
+            if (id && !pixels.has(id)) pixels.set(id, { id, name: String(pixel?.name || `Pixel ${id}`), lastFiredTime: pixel?.last_fired_time || null });
           }
-        } catch (err: any) {
-          error = err?.response?.data?.error?.message || err?.message || 'Não foi possível listar Pixels desta conta.';
-        }
+        } catch (error: any) { discoveryError = error?.response?.data?.error?.message || error?.message || 'Não foi possível listar Pixels desta conta.'; }
       }
-      pixels = Array.from(map.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
     }
-    return ok({
-      client,
-      businessId,
-      configured: Boolean(stored?.value?.pixelId),
-      selectedPixel: stored?.value || null,
-      updatedAt: stored?.createdAt || null,
-      pixels,
-      discoveryError: error,
-    });
+    return ok({ client, businessId, configured: Boolean(stored?.value?.pixelId), selectedPixel: stored?.value || null, updatedAt: stored?.createdAt || null, pixels: Array.from(pixels.values()).sort((a, b) => a.name.localeCompare(b.name)), discoveryError });
   });
 
   app.put('/workspace/meta-pixels/config', { preHandler: requireAuth([...adminRoles]) }, async (req, reply) => {
@@ -359,21 +276,10 @@ export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) 
     if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Empresa, BM e Pixel são obrigatórios.'));
     const client = await requireClient(user, body.data.clientId, reply);
     if (!client) return;
-    const manager = await prisma.businessManager.findFirst({ where: { organizationId: user.organizationId!, clientId: client.id, metaBusinessId: body.data.businessId, status: 'active' } });
-    if (!manager) return reply.code(404).send(fail('BUSINESS_NOT_FOUND', 'Business Manager não pertence à empresa selecionada.'));
-
-    const metadata: PixelConfig = { pixelId: body.data.pixelId, pixelName: body.data.pixelName, businessId: body.data.businessId };
-    await prisma.auditLog.create({
-      data: {
-        organizationId: user.organizationId,
-        userId: user.id,
-        businessId: body.data.businessId,
-        action: PIXEL_CONFIG_ACTION,
-        entity: 'MetaPixel',
-        entityId: `${client.id}:${body.data.businessId}`,
-        metadataJson: metadata as unknown as Prisma.InputJsonValue,
-      },
-    });
+    const manager = await requireBusiness(user, client.id, body.data.businessId, reply);
+    if (!manager) return;
+    const metadata: PixelConfig = { pixelId: body.data.pixelId, pixelName: body.data.pixelName, businessId: manager.metaBusinessId };
+    await prisma.auditLog.create({ data: { organizationId: user.organizationId, userId: user.id, businessId: manager.metaBusinessId, action: PIXEL_CONFIG_ACTION, entity: 'MetaPixel', entityId: `${client.id}:${manager.metaBusinessId}`, metadataJson: metadata as any } });
     return ok(metadata, 'Pixel vinculado à empresa e à Business Manager.');
   });
 
@@ -383,28 +289,17 @@ export async function registerMarketingIntelligenceRoutes(app: FastifyInstance) 
     if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Filtros do Pixel inválidos.'));
     const client = await requireClient(user, query.data.clientId, reply);
     if (!client) return;
-    const businessId = effectiveBusinessId(user, query.data.businessId);
-    if (!businessId || businessId === '__NO_BUSINESS__') return reply.code(400).send(fail('BUSINESS_REQUIRED', 'Selecione uma Business Manager.'));
-    const stored = await latestConfig<PixelConfig>(user.organizationId!, PIXEL_CONFIG_ACTION, `${client.id}:${businessId}`);
+    const manager = await requireBusiness(user, client.id, query.data.businessId, reply);
+    if (!manager) return;
+    const stored = await latestConfig<PixelConfig>(user.organizationId!, PIXEL_CONFIG_ACTION, `${client.id}:${manager.metaBusinessId}`);
     if (!stored?.value?.pixelId) return reply.code(409).send(fail('PIXEL_NOT_CONFIGURED', 'Nenhum Pixel foi vinculado a esta empresa/BM.'));
     const connection = await activeMetaConnection(user.organizationId!, client.id);
     if (!connection) return reply.code(409).send(fail('META_NOT_CONNECTED', 'A Meta não está conectada para esta empresa.'));
-
     try {
-      const meta = new MetaAdsService(decrypt(connection.accessTokenEncrypted));
-      const stats = await meta.pixelStats(stored.value.pixelId, query.data.since, query.data.until);
-      return ok({
-        client,
-        businessId,
-        pixel: stored.value,
-        since: query.data.since,
-        until: query.data.until,
-        retentionNotice: 'A disponibilidade histórica do endpoint de estatísticas do Pixel depende da retenção e das permissões da Meta.',
-        stats,
-      });
+      const stats = await new MetaAdsService(decrypt(connection.accessTokenEncrypted)).pixelStats(stored.value.pixelId, query.data.since, query.data.until);
+      return ok({ client, businessId: manager.metaBusinessId, pixel: stored.value, since: query.data.since, until: query.data.until, retentionNotice: 'A disponibilidade histórica do endpoint de estatísticas do Pixel depende da retenção e das permissões da Meta.', stats });
     } catch (error: any) {
-      const message = error?.response?.data?.error?.message || error?.message || 'Falha ao consultar métricas do Pixel.';
-      return reply.code(502).send(fail('PIXEL_STATS_FAILED', message));
+      return reply.code(502).send(fail('PIXEL_STATS_FAILED', error?.response?.data?.error?.message || error?.message || 'Falha ao consultar métricas do Pixel.'));
     }
   });
 }
