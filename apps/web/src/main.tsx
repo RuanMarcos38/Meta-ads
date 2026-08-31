@@ -14,6 +14,7 @@ import Alerts from './pages/Alerts';
 import Support from './pages/SupportPro';
 import UsersAccess from './pages/UsersAccess';
 import Integrations from './pages/Integrations';
+import GoogleAnalytics from './pages/GoogleAnalytics';
 import Audit from './pages/Audit';
 import AgencyOverview from './pages/AgencyOverview';
 import Settings from './pages/Settings';
@@ -43,6 +44,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="business-managers" element={<BusinessManagers />} />
           <Route path="contas-meta" element={<AdAccounts />} />
           <Route path="campanhas" element={<Campaigns />} />
+          <Route path="google-analytics" element={<GoogleAnalytics />} />
           <Route path="relatorios" element={<Reports />} />
           <Route path="alertas" element={<Alerts />} />
           <Route path="atendimento" element={<Support />} />
