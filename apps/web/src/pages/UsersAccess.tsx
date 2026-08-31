@@ -1,20 +1,98 @@
 import { useEffect, useMemo, useState } from 'react';
-import { KeyRound, RefreshCw, Shield, Trash2, UserPlus, Users } from 'lucide-react';
+import { Building2, KeyRound, Plus, RefreshCw, Shield, Trash2, UserPlus, Users } from 'lucide-react';
 import { api } from '../api';
 import { useAuth, useScope } from '../store';
 
 type AccessUser={id:string;name:string;email:string;role:string;clientId?:string|null;businessId?:string|null;isActive:boolean;mustChangePassword?:boolean;lastLoginAt?:string|null;createdAt?:string};
+
 export default function UsersAccess(){
- const auth=useAuth(s=>s.user);const scope=useScope();const isAdmin=['SUPER_ADMIN','AGENCY_ADMIN'].includes(auth?.role||'');
- const[rows,setRows]=useState<AccessUser[]>([]);const[loading,setLoading]=useState(false);const[saving,setSaving]=useState(false);const[deletingId,setDeletingId]=useState('');const[error,setError]=useState('');
- const[name,setName]=useState('');const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[role,setRole]=useState<'CLIENT'|'MANAGER'|'AGENCY_ADMIN'>('CLIENT');const[clientId,setClientId]=useState(scope.clientId);const[businessId,setBusinessId]=useState(scope.businessId);
+ const auth=useAuth(s=>s.user);
+ const scope=useScope();
+ const isAdmin=['SUPER_ADMIN','AGENCY_ADMIN'].includes(auth?.role||'');
+ const[rows,setRows]=useState<AccessUser[]>([]);
+ const[loading,setLoading]=useState(false);
+ const[saving,setSaving]=useState(false);
+ const[companySaving,setCompanySaving]=useState(false);
+ const[deletingId,setDeletingId]=useState('');
+ const[error,setError]=useState('');
+ const[success,setSuccess]=useState('');
+ const[name,setName]=useState('');
+ const[email,setEmail]=useState('');
+ const[password,setPassword]=useState('');
+ const[role,setRole]=useState<'CLIENT'|'MANAGER'|'AGENCY_ADMIN'>('CLIENT');
+ const[clientId,setClientId]=useState(scope.clientId);
+ const[businessId,setBusinessId]=useState(scope.businessId);
+ const[companyName,setCompanyName]=useState('');
+ const[companyLegalName,setCompanyLegalName]=useState('');
+ const[companyEmail,setCompanyEmail]=useState('');
+ const[companyPhone,setCompanyPhone]=useState('');
+
  useEffect(()=>{setClientId(scope.clientId);setBusinessId(scope.businessId);},[scope.clientId,scope.businessId]);
- async function load(){setLoading(true);try{const r=await api.get('/workspace/users',{params:{...(scope.clientId?{clientId:scope.clientId}:{})}});setRows(Array.isArray(r.data?.data)?r.data.data:[]);setError('');}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível carregar usuários.');}finally{setLoading(false);}}
+
+ async function load(){
+  setLoading(true);
+  try{
+   const r=await api.get('/workspace/users',{params:{...(scope.clientId?{clientId:scope.clientId}:{})}});
+   setRows(Array.isArray(r.data?.data)?r.data.data:[]);
+   setError('');
+  }catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível carregar usuários.');}
+  finally{setLoading(false);}
+ }
  useEffect(()=>{void load();},[scope.clientId]);
+
  const businessOptions=useMemo(()=>scope.businesses.filter(b=>b.clientId===clientId),[scope.businesses,clientId]);
- async function create(e:React.FormEvent){e.preventDefault();if(!isAdmin)return;setSaving(true);setError('');try{await api.post('/workspace/users',{name,email,password,role,clientId:role==='AGENCY_ADMIN'?null:clientId,businessId:role==='AGENCY_ADMIN'?null:businessId});setName('');setEmail('');setPassword('');await load();}catch(err:any){setError(err?.response?.data?.error?.message||'Não foi possível criar o acesso.');}finally{setSaving(false);}}
+
+ async function createCompany(e:React.FormEvent){
+  e.preventDefault();
+  if(!isAdmin||!companyName.trim())return;
+  setCompanySaving(true);setError('');setSuccess('');
+  try{
+   const r=await api.post('/clients',{
+    name:companyName.trim(),
+    ...(companyLegalName.trim()?{companyName:companyLegalName.trim()}:{}),
+    ...(companyEmail.trim()?{email:companyEmail.trim().toLowerCase()}:{}),
+    ...(companyPhone.trim()?{phone:companyPhone.trim()}:{}),
+   });
+   const created=r.data?.data;
+   setCompanyName('');setCompanyLegalName('');setCompanyEmail('');setCompanyPhone('');
+   setSuccess('Empresa cadastrada. Agora conecte a Meta/BM da empresa e depois crie os usuários vinculados.');
+   window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
+   if(created?.id){scope.setClientId(created.id);setClientId(created.id);setBusinessId('');}
+  }catch(err:any){setError(err?.response?.data?.error?.message||'Não foi possível cadastrar a empresa.');}
+  finally{setCompanySaving(false);}
+ }
+
+ async function create(e:React.FormEvent){
+  e.preventDefault();if(!isAdmin)return;setSaving(true);setError('');setSuccess('');
+  try{
+   await api.post('/workspace/users',{name,email,password,role,clientId:role==='AGENCY_ADMIN'?null:clientId,businessId:role==='AGENCY_ADMIN'?null:businessId});
+   setName('');setEmail('');setPassword('');setSuccess('Acesso criado com sucesso.');await load();
+  }catch(err:any){setError(err?.response?.data?.error?.message||'Não foi possível criar o acesso.');}
+  finally{setSaving(false);}
+ }
+
  async function toggle(row:AccessUser){try{await api.patch(`/workspace/users/${row.id}`,{isActive:!row.isActive});await load();}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível alterar o acesso.');}}
- async function reset(row:AccessUser){const next=window.prompt(`Nova senha temporária para ${row.email} (mínimo 10 caracteres):`);if(!next)return;try{await api.patch(`/workspace/users/${row.id}`,{password:next});await load();}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível redefinir a senha.');}}
- async function remove(row:AccessUser){if(row.id===auth?.id)return;const confirmed=window.confirm(`Excluir definitivamente o usuário ${row.name} (${row.email})?\n\nO acesso será removido, mas registros de auditoria e histórico de atendimento serão preservados.`);if(!confirmed)return;setDeletingId(row.id);setError('');try{await api.delete(`/workspace/users/${row.id}`);await load();}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível excluir o usuário.');}finally{setDeletingId('');}}
- return <div className="space-y-4"><section className="page-heading"><div><p className="section-kicker">Segurança</p><h1>Usuários e acessos</h1><p>Cada Cliente/Gestor fica vinculado a uma empresa e BM. O isolamento é validado também no backend.</p></div><button className="secondary-button" onClick={()=>{void load();}} disabled={loading}><RefreshCw size={14} className={loading?'animate-spin':''}/>Atualizar</button></section>{error&&<div className="message-warning">{error}</div>}{isAdmin&&<form onSubmit={create} className="filter-panel"><div className="mb-3 flex items-center gap-2"><UserPlus size={15} className="text-[#176846]"/><div><h2 className="panel-title">Novo acesso</h2><p className="panel-subtitle">Cliente e Gestor obrigatoriamente recebem Empresa + BM.</p></div></div><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6"><label className="field-label">Nome<input className="field-control" value={name} onChange={e=>setName(e.target.value)} required/></label><label className="field-label">E-mail<input className="field-control" type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label className="field-label">Senha temporária<input className="field-control" type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={10} required/></label><label className="field-label">Perfil<select className="field-control" value={role} onChange={e=>setRole(e.target.value as any)}><option value="CLIENT">Cliente</option><option value="MANAGER">Gestor</option><option value="AGENCY_ADMIN">Administrador da agência</option></select></label><label className="field-label">Empresa<select className="field-control" value={clientId} disabled={role==='AGENCY_ADMIN'} onChange={e=>{setClientId(e.target.value);setBusinessId('');}}><option value="">Selecione</option>{scope.clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="field-label">Business Manager<select className="field-control" value={businessId} disabled={role==='AGENCY_ADMIN'||!clientId} onChange={e=>setBusinessId(e.target.value)}><option value="">Selecione</option>{businessOptions.map(b=><option key={b.id} value={b.metaBusinessId}>{b.name}</option>)}</select></label></div><div className="mt-3 flex justify-end"><button className="primary-button" disabled={saving||(['CLIENT','MANAGER'].includes(role)&&(!clientId||!businessId))}><UserPlus size={14}/>{saving?'Criando':'Criar acesso'}</button></div></form>}<section className="corporate-card overflow-hidden"><div className="table-scroll"><table className="corporate-table"><thead><tr><th>Usuário</th><th>Perfil</th><th>Empresa</th><th>BM</th><th>Status</th><th>Último login</th><th>Ações</th></tr></thead><tbody>{rows.map(row=>{const client=scope.clients.find(c=>c.id===row.clientId);const bm=scope.businesses.find(b=>b.clientId===row.clientId&&b.metaBusinessId===row.businessId);return <tr key={row.id}><td><strong>{row.name}</strong><small>{row.email}</small></td><td><span className="status-chip status-neutral"><Shield size={11}/>{row.role}</span></td><td>{client?.name||'Agência'}</td><td>{bm?.name||row.businessId||'Todas'}</td><td><span className={`status-chip ${row.isActive?'status-success':'status-neutral'}`}>{row.isActive?'Ativo':'Inativo'}</span></td><td>{row.lastLoginAt?new Date(row.lastLoginAt).toLocaleString('pt-BR'):'Nunca'}</td><td>{isAdmin&&<div className="flex flex-wrap gap-1"><button className="secondary-button" onClick={()=>{void toggle(row);}}>{row.isActive?'Desativar':'Ativar'}</button><button className="icon-button" title="Redefinir senha" onClick={()=>{void reset(row);}}><KeyRound size={13}/></button>{row.id!==auth?.id&&<button className="icon-button text-red-600" title="Excluir usuário" disabled={deletingId===row.id} onClick={()=>{void remove(row);}}><Trash2 size={13}/></button>}</div>}</td></tr>})}{!rows.length&&!loading&&<tr><td colSpan={7}><div className="empty-state"><Users size={20}/><span>Nenhum usuário neste escopo.</span></div></td></tr>}</tbody></table></div></section></div>;
+ async function reset(row:AccessUser){const next=window.prompt(`Nova senha temporária para ${row.email} (mínimo 10 caracteres):`);if(!next)return;try{await api.patch(`/workspace/users/${row.id}`,{password:next});setSuccess('Senha temporária atualizada.');await load();}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível redefinir a senha.');}}
+ async function remove(row:AccessUser){if(row.id===auth?.id)return;const confirmed=window.confirm(`Excluir definitivamente o usuário ${row.name} (${row.email})?\n\nO acesso será removido, mas registros de auditoria e histórico de atendimento serão preservados.`);if(!confirmed)return;setDeletingId(row.id);setError('');setSuccess('');try{await api.delete(`/workspace/users/${row.id}`);setSuccess('Usuário excluído.');await load();}catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível excluir o usuário.');}finally{setDeletingId('');}}
+
+ return <div className="space-y-4">
+  <section className="page-heading"><div><p className="section-kicker">Segurança</p><h1>Usuários e acessos</h1><p>Cadastre empresas e mantenha cada Cliente/Gestor vinculado à empresa e à Business Manager correta.</p></div><button className="secondary-button" onClick={()=>{void load();}} disabled={loading}><RefreshCw size={14} className={loading?'animate-spin':''}/>Atualizar</button></section>
+  {error&&<div className="message-warning">{error}</div>}
+  {success&&<div className="rounded-[8px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">{success}</div>}
+
+  {isAdmin&&<form onSubmit={createCompany} className="filter-panel">
+   <div className="mb-3 flex items-center gap-2"><Building2 size={15} className="text-[#2563eb]"/><div><h2 className="panel-title">Nova empresa</h2><p className="panel-subtitle">Cadastre a empresa sem sair desta tela. Depois conecte a BM e crie os acessos vinculados.</p></div></div>
+   <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+    <label className="field-label">Nome da empresa<input className="field-control" value={companyName} onChange={e=>setCompanyName(e.target.value)} required placeholder="Ex.: ECOJOI"/></label>
+    <label className="field-label">Razão social<input className="field-control" value={companyLegalName} onChange={e=>setCompanyLegalName(e.target.value)} placeholder="Opcional"/></label>
+    <label className="field-label">E-mail da empresa<input className="field-control" type="email" value={companyEmail} onChange={e=>setCompanyEmail(e.target.value)} placeholder="Opcional"/></label>
+    <label className="field-label">Telefone<input className="field-control" value={companyPhone} onChange={e=>setCompanyPhone(e.target.value)} placeholder="Opcional"/></label>
+   </div>
+   <div className="mt-3 flex justify-end"><button className="primary-button" disabled={companySaving||!companyName.trim()}><Plus size={14}/>{companySaving?'Cadastrando':'Cadastrar empresa'}</button></div>
+  </form>}
+
+  {isAdmin&&<form onSubmit={create} className="filter-panel"><div className="mb-3 flex items-center gap-2"><UserPlus size={15} className="text-[#2563eb]"/><div><h2 className="panel-title">Novo acesso</h2><p className="panel-subtitle">Cliente e Gestor obrigatoriamente recebem Empresa + BM. O cadastro existente foi preservado.</p></div></div><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6"><label className="field-label">Nome<input className="field-control" value={name} onChange={e=>setName(e.target.value)} required/></label><label className="field-label">E-mail<input className="field-control" type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label className="field-label">Senha temporária<input className="field-control" type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={10} required/></label><label className="field-label">Perfil<select className="field-control" value={role} onChange={e=>setRole(e.target.value as any)}><option value="CLIENT">Cliente</option><option value="MANAGER">Gestor</option><option value="AGENCY_ADMIN">Administrador da agência</option></select></label><label className="field-label">Empresa<select className="field-control" value={clientId} disabled={role==='AGENCY_ADMIN'} onChange={e=>{setClientId(e.target.value);setBusinessId('');}}><option value="">Selecione</option>{scope.clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="field-label">Business Manager<select className="field-control" value={businessId} disabled={role==='AGENCY_ADMIN'||!clientId} onChange={e=>setBusinessId(e.target.value)}><option value="">Selecione</option>{businessOptions.map(b=><option key={b.id} value={b.metaBusinessId}>{b.name}</option>)}</select></label></div><div className="mt-3 flex justify-end"><button className="primary-button" disabled={saving||(['CLIENT','MANAGER'].includes(role)&&(!clientId||!businessId))}><UserPlus size={14}/>{saving?'Criando':'Criar acesso'}</button></div></form>}
+
+  <section className="corporate-card overflow-hidden"><div className="table-scroll"><table className="corporate-table"><thead><tr><th>Usuário</th><th>Perfil</th><th>Empresa</th><th>BM</th><th>Status</th><th>Último login</th><th>Ações</th></tr></thead><tbody>{rows.map(row=>{const client=scope.clients.find(c=>c.id===row.clientId);const bm=scope.businesses.find(b=>b.clientId===row.clientId&&b.metaBusinessId===row.businessId);return <tr key={row.id}><td><strong>{row.name}</strong><small>{row.email}</small></td><td><span className="status-chip status-neutral"><Shield size={11}/>{row.role}</span></td><td>{client?.name||'Agência'}</td><td>{bm?.name||row.businessId||'Todas'}</td><td><span className={`status-chip ${row.isActive?'status-success':'status-neutral'}`}>{row.isActive?'Ativo':'Inativo'}</span></td><td>{row.lastLoginAt?new Date(row.lastLoginAt).toLocaleString('pt-BR'):'Nunca'}</td><td>{isAdmin&&<div className="flex flex-wrap gap-1"><button className="secondary-button" onClick={()=>{void toggle(row);}}>{row.isActive?'Desativar':'Ativar'}</button><button className="icon-button" title="Redefinir senha" onClick={()=>{void reset(row);}}><KeyRound size={13}/></button>{row.id!==auth?.id&&<button className="icon-button text-red-600" title="Excluir usuário" disabled={deletingId===row.id} onClick={()=>{void remove(row);}}><Trash2 size={13}/></button>}</div>}</td></tr>})}{!rows.length&&!loading&&<tr><td colSpan={7}><div className="empty-state"><Users size={20}/><span>Nenhum usuário neste escopo.</span></div></td></tr>}</tbody></table></div></section>
+ </div>;
 }
