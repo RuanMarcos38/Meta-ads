@@ -37,7 +37,7 @@ export default function GlobalScopeBar() {
         selectedBusinessId: data.selectedBusinessId,
       });
     } catch (requestError: any) {
-      setError(requestError?.response?.data?.error?.message || requestError?.response?.data?.message || 'Não foi possível carregar empresas e BMs.');
+      setError(requestError?.response?.data?.error?.message || requestError?.response?.data?.message || 'Não foi possível carregar empresas e Gerenciadores de Negócios.');
     } finally {
       setLoading(false);
     }
@@ -63,7 +63,7 @@ export default function GlobalScopeBar() {
         selectedBusinessId: data.selectedBusinessId,
       });
     } catch (requestError: any) {
-      setError(requestError?.response?.data?.error?.message || requestError?.response?.data?.message || 'Não foi possível atualizar as BMs pela Meta.');
+      setError(requestError?.response?.data?.error?.message || requestError?.response?.data?.message || 'Não foi possível atualizar os Gerenciadores de Negócios pela Meta.');
     } finally {
       setLoading(false);
     }
@@ -114,11 +114,11 @@ export default function GlobalScopeBar() {
             </select>
           </label>
           <label className="relative min-w-0">
-            <span className="sr-only">Business Manager</span>
+            <span className="sr-only">Gerenciador de Negócios</span>
             <BriefcaseBusiness size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <select value={scope.businessId} disabled={scope.tenantLocked} onChange={(event) => scope.setBusinessId(event.target.value)} className="scope-select h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd] disabled:bg-[#f2f4f2]">
-              {!businesses.length && <option value="">BM não vinculada</option>}
-              {!scope.tenantLocked && <option value="">Todas as BMs</option>}
+              {!businesses.length && <option value="">Gerenciador não vinculado</option>}
+              {!scope.tenantLocked && <option value="">Todos os Gerenciadores de Negócios</option>}
               {businesses.map((business) => <option key={business.id} value={business.metaBusinessId}>{business.name}</option>)}
             </select>
           </label>
@@ -133,7 +133,7 @@ export default function GlobalScopeBar() {
         </div>
         <div className="flex shrink-0 items-center justify-between gap-2 xl:justify-end">
           {error ? <span className="scope-feedback text-[10px] font-medium text-amber-700">{error}</span> : <span className="scope-feedback text-[10px] text-slate-400">Escopo aplicado em toda a plataforma</span>}
-          <button type="button" onClick={() => { void refreshFromMeta(); }} disabled={loading} className="grid h-9 w-9 place-items-center rounded-[7px] border border-[#d9e0dc] bg-white text-slate-500 hover:border-[#bfdbfe] hover:bg-[#eff6ff] hover:text-[#2563eb] disabled:opacity-50" title={isAdmin ? 'Buscar BMs e contas novamente na Meta' : 'Atualizar empresas e BMs'}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
+          <button type="button" onClick={() => { void refreshFromMeta(); }} disabled={loading} className="grid h-9 w-9 place-items-center rounded-[7px] border border-[#d9e0dc] bg-white text-slate-500 hover:border-[#bfdbfe] hover:bg-[#eff6ff] hover:text-[#2563eb] disabled:opacity-50" title={isAdmin ? 'Buscar novamente os Gerenciadores de Negócios e contas na Meta' : 'Atualizar empresas e Gerenciadores de Negócios'}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
         </div>
       </div>
     </div>
