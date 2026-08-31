@@ -15,7 +15,7 @@ interface AuthState {
   setUser: (user: User | null) => void;
 }
 
-export type ScopeClient = { id: string; name: string; companyName?: string | null; status?: string; _count?: { users: number; adAccounts: number; businessManagers: number } };
+export type ScopeClient = { id: string; name: string; companyName?: string | null; email?: string | null; phone?: string | null; status?: string; _count?: { users: number; adAccounts: number; businessManagers: number } };
 export type ScopeBusiness = { id: string; clientId: string; metaBusinessId: string; name: string; adminEmail?: string | null; status: string; connectionStatus?: string; tokenStatus?: string };
 export type ScopeAccount = { id: string; clientId: string; businessManagerId?: string | null; businessId?: string | null; businessName?: string | null; accountId: string; name?: string | null; currency?: string | null; timezone?: string | null; accountStatus?: number | null; isActive: boolean; isAssigned: boolean };
 
