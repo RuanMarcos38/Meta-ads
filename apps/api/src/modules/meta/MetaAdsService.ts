@@ -45,6 +45,25 @@ async function getPagedWithFieldFallback(
   return [];
 }
 
+async function getObjectWithFieldFallback(
+  url: string,
+  accessToken: string,
+  fieldOptions: string[],
+) {
+  let lastError: unknown;
+  for (const fields of fieldOptions) {
+    try {
+      const response = await withRetry(() => axios.get(url, {
+        params: { access_token: accessToken, fields },
+      }));
+      return response.data;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 async function postForm<T>(url: string, accessToken: string, values: Record<string, string>): Promise<T> {
   const body = new URLSearchParams();
   body.set('access_token', accessToken);
@@ -137,6 +156,42 @@ export class MetaAdsService {
     return getPaged(`${BASE()}/me/adaccounts`, {
       access_token: this.accessToken,
       fields: 'account_id,name,currency,timezone_name,account_status',
+    });
+  }
+
+  accountFinance(actId: string) {
+    return getObjectWithFieldFallback(`${BASE()}/${actId}`, this.accessToken, [
+      'id,account_id,name,business,business_name,amount_spent,balance,currency,spend_cap,funding_source,funding_source_details,is_prepay_account,timezone_name',
+      'id,account_id,name,business,amount_spent,balance,currency,spend_cap,is_prepay_account,timezone_name',
+      'id,account_id,name,amount_spent,balance,currency,spend_cap,timezone_name',
+      'id,account_id,name,currency,timezone_name',
+    ]);
+  }
+
+  transactions(actId: string, since: string, until: string) {
+    return getPaged(`${BASE()}/${actId}/transactions`, {
+      access_token: this.accessToken,
+      since,
+      until,
+      limit: '100',
+    });
+  }
+
+  adAccountPixels(actId: string) {
+    return getPagedWithFieldFallback(`${BASE()}/${actId}/adspixels`, this.accessToken, [
+      'id,name,last_fired_time',
+      'id,name',
+      'id',
+    ], '200');
+  }
+
+  pixelStats(pixelId: string, since: string, until: string) {
+    return getPaged(`${BASE()}/${pixelId}/stats`, {
+      access_token: this.accessToken,
+      aggregation: 'event',
+      start_time: since,
+      end_time: until,
+      limit: '500',
     });
   }
 

@@ -17,6 +17,7 @@ import Integrations from './pages/Integrations';
 import Audit from './pages/Audit';
 import AgencyOverview from './pages/AgencyOverview';
 import Settings from './pages/Settings';
+import MarketingIntelligence from './pages/MarketingIntelligence';
 import { useAuth } from './store';
 
 function Private({ children }: { children: React.ReactNode }) {
@@ -44,6 +45,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="contas-meta" element={<AdAccounts />} />
           <Route path="campanhas" element={<Campaigns />} />
           <Route path="relatorios" element={<Reports />} />
+          <Route path="analytics" element={<MarketingIntelligence />} />
           <Route path="alertas" element={<Alerts />} />
           <Route path="atendimento" element={<Support />} />
           <Route path="usuarios" element={<Roles roles={['SUPER_ADMIN','AGENCY_ADMIN','MANAGER']}><UsersAccess /></Roles>} />

@@ -5,7 +5,7 @@ import { useAuth, useScope } from '../store';
 import GlobalScopeBar from './GlobalScopeBar';
 import {
   BarChart3, Bell, BriefcaseBusiness, Building2, CreditCard, FileClock,
-  FileText, HelpCircle, LayoutDashboard, Link2, LogOut, Megaphone, MessageSquareText,
+  FileText, HelpCircle, LayoutDashboard, LineChart, Link2, LogOut, Megaphone, MessageSquareText,
   Plus, Search, Settings2, ShieldCheck, UserCircle, Users,
 } from 'lucide-react';
 
@@ -25,6 +25,7 @@ const groups:MenuGroup[]=[
   {label:'Operação',items:[
     {to:'/campanhas',label:'Campanhas',icon:Megaphone},
     {to:'/relatorios',label:'Relatórios',icon:FileText},
+    {to:'/analytics',label:'Google Analytics',icon:LineChart},
     {to:'/alertas',label:'Alertas',icon:Bell},
     {to:'/atendimento',label:'Atendimento',icon:MessageSquareText},
   ]},
