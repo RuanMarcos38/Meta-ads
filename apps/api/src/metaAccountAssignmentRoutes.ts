@@ -8,6 +8,7 @@ import { runSync } from './modules/meta/syncService.js';
 
 const paramsSchema = z.object({ id: z.string().uuid() });
 const assignmentSchema = z.object({ isAssigned: z.boolean() });
+const RELEASE_VERSION = '2026.08.31.1';
 
 async function assignmentHandler(req: FastifyRequest, reply: FastifyReply) {
   const user = req.user as AuthUser;
@@ -111,9 +112,6 @@ async function assignmentHandler(req: FastifyRequest, reply: FastifyReply) {
     req.log.warn({ auditError, accountId: updated.id }, 'Falha não bloqueante ao registrar auditoria da conta Meta.');
   }
 
-  // Na primeira autorização feita pela rota POST nova, inicia o backfill completo.
-  // O PATCH legado já existente continua atendendo builds antigos; o scheduler
-  // detecta qualquer empresa autorizada sem history success e completa o histórico.
   const shouldStartHistory = body.data.isAssigned && !account.isAssigned && !env.demoMode;
   if (shouldStartHistory) {
     const existingHistory = await prisma.syncJob.findFirst({
@@ -147,12 +145,10 @@ async function assignmentHandler(req: FastifyRequest, reply: FastifyReply) {
 export async function registerMetaAccountAssignmentRoutes(app: FastifyInstance) {
   app.get('/meta/account-assignment-capability', async () => ok({
     enabled: true,
-    version: '2026.08.30.2',
+    version: RELEASE_VERSION,
     methods: ['POST', 'PATCH'],
   }));
 
-  // POST é a rota nova e mais segura. O PATCH permanece registrado em tenantRoutes
-  // para compatibilidade com o frontend já publicado, evitando qualquer quebra.
   app.post('/meta/client-accounts/:id/assignment', {
     preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']),
   }, assignmentHandler);
