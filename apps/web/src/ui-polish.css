@@ -1,9 +1,12 @@
 /* Refinamento visual incremental: mantém a estrutura existente e remove excessos artificiais. */
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-kerning: normal;
+  font-variant-numeric: tabular-nums lining-nums;
   --ui-text: #1f2937;
   --ui-muted: #667085;
   --ui-border: #e2e7e4;
@@ -21,7 +24,7 @@ body {
   letter-spacing: 0;
 }
 
-h1, h2, h3, h4, strong, button, input, select, textarea {
+body, h1, h2, h3, h4, p, span, small, strong, label, button, input, select, textarea, table, th, td {
   font-family: inherit;
 }
 
@@ -31,6 +34,11 @@ h1, h2, h3, h4 {
 
 button, input, select, textarea {
   font-size: 13px;
+}
+
+input, select, textarea, button, .tabular-nums, .mini-stat strong, .corporate-table td {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1, "kern" 1;
 }
 
 .corporate-card,
@@ -59,13 +67,44 @@ button, input, select, textarea {
 .secondary-button {
   min-height: 36px;
   white-space: nowrap;
+  font-size: 11px !important;
+  line-height: 1.2;
+}
+
+.field-label {
+  gap: 6px !important;
+  font-size: 10px !important;
+  line-height: 1.3;
+  letter-spacing: 0.04em !important;
+}
+
+.panel-title {
+  font-size: 13px !important;
+  line-height: 1.3;
+}
+
+.panel-subtitle {
+  font-size: 11px !important;
+  line-height: 1.5 !important;
 }
 
 .field-control,
 .scope-select {
   min-width: 0;
   max-width: 100%;
-  line-height: 1.25;
+  min-height: 38px;
+  font-size: 12px !important;
+  line-height: 1.3;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+select.field-control,
+select.scope-select {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 30px;
 }
 
 .field-control:focus,
@@ -106,17 +145,24 @@ button, input, select, textarea {
 .corporate-table {
   width: 100%;
   border-collapse: collapse;
+  font-size: 11px !important;
 }
 
 .corporate-table th,
 .corporate-table td {
   vertical-align: middle;
+  line-height: 1.35;
 }
 
 .corporate-table th {
   white-space: nowrap;
-  font-weight: 600;
-  letter-spacing: 0.025em;
+  font-size: 9px !important;
+  font-weight: 650;
+  letter-spacing: 0.035em;
+}
+
+.corporate-table td {
+  font-size: 11px !important;
 }
 
 .corporate-table td strong,
@@ -126,9 +172,36 @@ button, input, select, textarea {
   overflow-wrap: anywhere;
 }
 
+.corporate-table td strong {
+  font-size: 11px !important;
+  line-height: 1.35;
+}
+
 .corporate-table td small,
 .detail-row small {
+  font-size: 9.5px !important;
+  line-height: 1.4;
+}
+
+.mini-stat span {
+  font-size: 9px !important;
+  line-height: 1.25;
+}
+
+.mini-stat strong {
+  font-size: 13px !important;
+  line-height: 1.25;
+}
+
+.mini-stat small {
+  font-size: 9.5px !important;
   line-height: 1.35;
+}
+
+.status-chip {
+  white-space: nowrap;
+  font-size: 9.5px !important;
+  line-height: 1.2;
 }
 
 .companies-table {
@@ -222,11 +295,14 @@ button, input, select, textarea {
 .scope-feedback {
   display: block;
   max-width: 360px;
-  line-height: 1.35;
+  font-size: 10px !important;
+  line-height: 1.4;
 }
 
-.status-chip {
-  white-space: nowrap;
+.bm-company-panel input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
 }
 
 @media (max-width: 1024px) {
