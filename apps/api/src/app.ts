@@ -7,6 +7,7 @@ import { env } from './config/env.js';
 import { registerRoutes } from './routes.js';
 import { registerOperationalRoutes } from './operationalRoutes.js';
 import { registerDatabaseDiagnostics } from './databaseDiagnostics.js';
+import { registerWhatsappDiagnostics } from './whatsappDiagnostics.js';
 import { registerMetaDiagnostics } from './metaDiagnostics.js';
 import { registerMetaDisconnectRoutes } from './metaDisconnectRoutes.js';
 import { registerTenantRoutes } from './tenantRoutes.js';
@@ -45,6 +46,7 @@ export async function buildApp() {
   await registerTenantIsolation(app);
 
   await registerDatabaseDiagnostics(app);
+  await registerWhatsappDiagnostics(app);
   await registerRoutes(app);
   await registerClientManagementRoutes(app);
   await registerOperationalRoutes(app);
