@@ -99,6 +99,27 @@ jobs:
           printf '%s' "$body" | jq -e '.success == true and .data.ready == true and .data.activeUsers > 0 and .data.schema == "gestao_ads"' >/dev/null
           echo "Autenticação inicializada com usuário ativo."
 
+      - name: Check Evolution WhatsApp connection
+        env:
+          API_URL: https://api-gestao.r2rmarketingdigital.com.br
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            body="$(curl -fsSL --connect-timeout 10 --max-time 20 "${API_URL}/diagnostics/whatsapp?attempt=${attempt}" 2>/dev/null || true)"
+            if printf '%s' "$body" | jq -e '.success == true and .data.configured == true and .data.reachable == true and .data.connected == true and .data.category == "CONNECTED"' >/dev/null 2>&1; then
+              state="$(printf '%s' "$body" | jq -r '.data.state // "unknown"')"
+              host="$(printf '%s' "$body" | jq -r '.data.host // "unknown"')"
+              echo "Evolution API configurada, acessível e conectada. host=${host} state=${state}"
+              exit 0
+            fi
+            category="$(printf '%s' "$body" | jq -r '.data.category // "indisponível"' 2>/dev/null || true)"
+            state="$(printf '%s' "$body" | jq -r '.data.state // "indisponível"' 2>/dev/null || true)"
+            echo "Tentativa ${attempt}/30: WhatsApp ainda não confirmou conexão. category=${category:-indisponível} state=${state:-indisponível}"
+            sleep 10
+          done
+          echo "A Evolution API não confirmou conexão ativa em produção."
+          exit 1
+
       - name: Check frontend CORS access
         env:
           API_URL: https://api-gestao.r2rmarketingdigital.com.br
