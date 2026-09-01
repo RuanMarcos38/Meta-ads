@@ -30,7 +30,7 @@ export function authorizedClientIds(user: AuthUser) {
   return Array.from(new Set([
     ...(user.clientId ? [user.clientId] : []),
     ...(Array.isArray(user.clientIds) ? user.clientIds : []),
-  ].filter(Boolean)));
+  ].filter(Boolean))) as string[];
 }
 
 export function hasMultiClientAccess(user: AuthUser) {
@@ -80,12 +80,15 @@ export function requireAuth(roles?: string[]) {
 
 // CLIENT e MANAGER continuam presos às empresas explicitamente vinculadas.
 // O clientId legado permanece como empresa principal; clientIds adiciona empresas extras.
-// Se o usuário não tiver vínculo válido, usamos um UUID impossível em vez de cair no consolidado.
+// Para usuário legado de empresa única, uma tentativa de trocar o clientId continua
+// sendo ignorada e mantém a empresa principal, exatamente como antes desta evolução.
 export function scopeClient(user: AuthUser, requestedClientId?: string): string | undefined {
   if (tenantRoles.has(user.role)) {
     const allowed = authorizedClientIds(user);
+    if (!allowed.length) return NO_CLIENT_SCOPE;
+    if (allowed.length === 1) return allowed[0];
     if (requestedClientId) return allowed.includes(requestedClientId) ? requestedClientId : NO_CLIENT_SCOPE;
-    return user.clientId && allowed.includes(user.clientId) ? user.clientId : allowed[0] || NO_CLIENT_SCOPE;
+    return user.clientId && allowed.includes(user.clientId) ? user.clientId : allowed[0];
   }
   return requestedClientId;
 }
