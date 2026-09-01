@@ -94,6 +94,7 @@ export default function UsersAccess(){
   scope.businesses.filter(b=>b.clientId===clientId&&b.status!=='inactive').forEach(item=>unique.set(item.metaBusinessId,item));
   return Array.from(unique.values()).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
  },[companyBusinesses,scope.businesses,clientId]);
+ const needsBmSetup=isAdmin&&role!=='AGENCY_ADMIN'&&Boolean(clientId)&&!businessLoading&&!businessOptions.length;
 
  const additionalCompanies=useMemo(()=>scope.clients.filter(item=>item.id!==clientId),[scope.clients,clientId]);
  const bmSetupClient=useMemo(()=>scope.clients.find(item=>item.id===bmSetupClientId),[scope.clients,bmSetupClientId]);
@@ -234,7 +235,7 @@ export default function UsersAccess(){
     <label className="field-label">Senha temporária<input className="field-control" type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={10} required/></label>
     <label className="field-label">Perfil<select className="field-control" value={role} onChange={e=>{const next=e.target.value as any;setRole(next);if(next==='AGENCY_ADMIN'){setAdditionalClientIds([]);setBusinessId('');}}}><option value="CLIENT">Cliente</option><option value="MANAGER">Gestor</option><option value="AGENCY_ADMIN">Administrador da agência</option></select></label>
     <label className="field-label">Empresa principal<select className="field-control" value={clientId} disabled={role==='AGENCY_ADMIN'} onChange={e=>{const next=e.target.value;setClientId(next);setBusinessId('');setAdditionalClientIds(current=>current.filter(id=>id!==next));}}><option value="">Selecione</option>{scope.clients.map(c=><option key={c.id} value={c.id}>{c.name}{c._count?.businessManagers?` · ${c._count.businessManagers} BM(s)`:''}</option>)}</select></label>
-    <label className="field-label">BM principal<select className="field-control" value={businessId} disabled={role==='AGENCY_ADMIN'||!clientId||businessLoading} onChange={e=>setBusinessId(e.target.value)}><option value="">{businessLoading?'Carregando BMs...':businessOptions.length?'Selecione':'Configure as BMs da empresa'}</option>{businessOptions.map(b=><option key={b.id} value={b.metaBusinessId}>{b.name}</option>)}</select></label>
+    <label className="field-label">BM principal<div className="flex min-w-0 gap-2"><select className="field-control min-w-0 flex-1" value={businessId} disabled={role==='AGENCY_ADMIN'||!clientId||businessLoading} onChange={e=>setBusinessId(e.target.value)}><option value="">{businessLoading?'Carregando BMs...':businessOptions.length?'Selecione':'Configure as BMs da empresa'}</option>{businessOptions.map(b=><option key={b.id} value={b.metaBusinessId}>{b.name}</option>)}</select>{needsBmSetup&&<button type="button" className="secondary-button shrink-0 px-2" title="Configurar BMs da empresa selecionada" onClick={()=>{void openBmSetup(clientId);}}><BriefcaseBusiness size={13}/><span className="hidden 2xl:inline">Configurar</span></button>}</div></label>
    </div>
 
    {role!=='AGENCY_ADMIN'&&clientId&&additionalCompanies.length>0&&<div className="mt-3 rounded-[8px] border border-[#dfe5e2] bg-white p-3">

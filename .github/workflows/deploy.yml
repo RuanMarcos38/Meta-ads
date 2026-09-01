@@ -181,5 +181,7 @@ jobs:
           if [ "${HOSTINGER_DEPLOY_READY}" = "true" ]; then
             echo "Frontend enviado para a Hostinger e verificado pelo SHA do commit."
           else
-            echo "Frontend compilado com sucesso e salvo como artifact. Publicação SFTP aguardando os secrets da Hostinger."
+            echo "Frontend compilado com sucesso e salvo como artifact, mas não foi publicado na Hostinger."
+            echo "Configure HOSTINGER_SFTP_HOST, HOSTINGER_SFTP_USER, HOSTINGER_SFTP_PASSWORD e HOSTINGER_SFTP_PATH nos secrets do repositório para habilitar a publicação automática."
+            exit 1
           fi
