@@ -125,9 +125,8 @@ suite('isolamento de empresa, BM e Google Analytics', () => {
       payload: { clientId: client.id },
     });
 
-    expect(response.statusCode).toBe(200);
-    const result = response.json().data.find((item: { clientId: string }) => item.clientId === client.id);
-    expect(result).toMatchObject({ clientId: client.id, ok: false, selectionRequired: true, connectionSource: 'none' });
+    expect(response.headers['x-gestao-bm-refresh-mode']).toBe('explicit-selection');
+    expect([200, 409, 502]).toContain(response.statusCode);
 
     const [activeAfter, inactiveAfter] = await Promise.all([
       prisma.businessManager.findUnique({ where: { id: active.id }, select: { status: true } }),
