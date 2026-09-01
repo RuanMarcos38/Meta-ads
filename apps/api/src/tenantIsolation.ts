@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { prisma } from './shared/prisma.js';
 import type { AuthUser } from './shared/auth.js';
 import { fail } from './shared/response.js';
 
@@ -12,6 +13,22 @@ const scopedPrefixes = [
 
 function isObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function jsonClientIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function linkedClientIds(primary?: string | null, extra?: unknown) {
+  return Array.from(new Set([...(primary ? [primary] : []), ...jsonClientIds(extra)]));
+}
+
+async function validateBusiness(organizationId: string, clientId: string, businessId: string) {
+  return prisma.businessManager.findFirst({
+    where: { organizationId, clientId, metaBusinessId: businessId, status: 'active' },
+    select: { id: true },
+  });
 }
 
 export async function registerTenantIsolation(app: FastifyInstance) {
@@ -28,37 +45,64 @@ export async function registerTenantIsolation(app: FastifyInstance) {
     const user = req.user as AuthUser;
     if (user.role !== 'CLIENT' && user.role !== 'MANAGER') return;
 
-    if (!user.clientId) {
-      return reply.code(403).send(fail('CLIENT_SCOPE_REQUIRED', 'Este usuário precisa estar vinculado a uma empresa.'));
-    }
-    if (!user.businessId) {
+    const current = await prisma.user.findFirst({
+      where: { id: user.id, isActive: true },
+      select: { organizationId: true, clientId: true, businessId: true, clientIdsJson: true },
+    });
+    if (!current?.organizationId) return reply.code(403).send(fail('CLIENT_SCOPE_REQUIRED', 'Este usuário precisa estar vinculado a uma empresa.'));
+
+    const allowedClients = linkedClientIds(current.clientId, current.clientIdsJson);
+    if (!allowedClients.length) return reply.code(403).send(fail('CLIENT_SCOPE_REQUIRED', 'Este usuário precisa estar vinculado a uma empresa.'));
+
+    user.organizationId = current.organizationId;
+    user.clientId = current.clientId || undefined;
+    user.businessId = current.businessId || undefined;
+    user.clientIds = allowedClients;
+
+    const multiClient = allowedClients.length > 1;
+    if (!multiClient && !current.businessId) {
       return reply.code(403).send(fail('BUSINESS_SCOPE_REQUIRED', 'Este usuário precisa estar vinculado a uma Business Manager.'));
     }
 
-    if (isObject(req.query)) {
-      const requestedClient = req.query.clientId;
-      const requestedBusiness = req.query.businessId;
-      if (requestedClient && requestedClient !== user.clientId) {
-        return reply.code(403).send(fail('FORBIDDEN', 'Empresa fora do escopo deste usuário.'));
-      }
-      if (requestedBusiness && requestedBusiness !== user.businessId) {
+    const requestedQueryClient = isObject(req.query) ? req.query.clientId : undefined;
+    const requestedBodyClient = isObject(req.body) ? req.body.clientId : undefined;
+    const requestedClient = requestedQueryClient || requestedBodyClient || current.clientId || allowedClients[0];
+    if (!requestedClient || !allowedClients.includes(String(requestedClient))) {
+      return reply.code(403).send(fail('FORBIDDEN', 'Empresa fora do escopo deste usuário.'));
+    }
+    const selectedClient = String(requestedClient);
+
+    const requestedQueryBusiness = isObject(req.query) ? req.query.businessId : undefined;
+    const requestedBodyBusiness = isObject(req.body) ? req.body.businessId : undefined;
+    const requestedBusiness = requestedQueryBusiness || requestedBodyBusiness;
+
+    if (!multiClient) {
+      if (requestedBusiness && requestedBusiness !== current.businessId) {
         return reply.code(403).send(fail('FORBIDDEN', 'Business Manager fora do escopo deste usuário.'));
       }
-      req.query.clientId = user.clientId;
-      req.query.businessId = user.businessId;
+      if (isObject(req.query)) {
+        req.query.clientId = current.clientId;
+        req.query.businessId = current.businessId;
+      }
+      if (isObject(req.body)) {
+        req.body.clientId = current.clientId;
+        req.body.businessId = current.businessId;
+      }
+      return;
     }
 
+    if (requestedBusiness) {
+      const validBusiness = await validateBusiness(current.organizationId, selectedClient, String(requestedBusiness));
+      if (!validBusiness) return reply.code(403).send(fail('FORBIDDEN', 'Business Manager fora da empresa selecionada ou não autorizada.'));
+    }
+
+    if (isObject(req.query)) {
+      req.query.clientId = selectedClient;
+      if (!requestedQueryBusiness) delete req.query.businessId;
+    }
     if (isObject(req.body)) {
-      const requestedClient = req.body.clientId;
-      const requestedBusiness = req.body.businessId;
-      if (requestedClient && requestedClient !== user.clientId) {
-        return reply.code(403).send(fail('FORBIDDEN', 'Empresa fora do escopo deste usuário.'));
-      }
-      if (requestedBusiness && requestedBusiness !== user.businessId) {
-        return reply.code(403).send(fail('FORBIDDEN', 'Business Manager fora do escopo deste usuário.'));
-      }
-      req.body.clientId = user.clientId;
-      req.body.businessId = user.businessId;
+      req.body.clientId = selectedClient;
+      if (!requestedBodyBusiness) delete req.body.businessId;
     }
   });
 
@@ -66,6 +110,10 @@ export async function registerTenantIsolation(app: FastifyInstance) {
     if (!req.url.startsWith('/dashboard/context') && !req.url.startsWith('/meta/status')) return payload;
     const user = req.user as AuthUser | undefined;
     if (!user || (user.role !== 'CLIENT' && user.role !== 'MANAGER') || !user.businessId) return payload;
+
+    // Usuário multiempresa já foi validado no preHandler por empresa/BM solicitada.
+    // O filtro legado abaixo continua exclusivamente para usuários de empresa única.
+    if (Array.isArray(user.clientIds) && user.clientIds.length > 1) return payload;
 
     try {
       const parsed = JSON.parse(Buffer.isBuffer(payload) ? payload.toString('utf8') : String(payload));
