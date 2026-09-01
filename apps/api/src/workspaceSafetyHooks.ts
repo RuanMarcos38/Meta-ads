@@ -84,6 +84,7 @@ export async function registerWorkspaceSafetyHooks(app: FastifyInstance) {
 
     const contentType = proxied.headers['content-type'];
     if (contentType) reply.header('content-type', contentType);
+    reply.header('x-gestao-bm-refresh-mode', 'explicit-selection');
 
     let body: unknown = proxied.body;
     try { body = proxied.json(); } catch { /* mantém texto quando não for JSON */ }
