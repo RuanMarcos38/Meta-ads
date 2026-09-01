@@ -17,6 +17,7 @@ import { registerMetaAccountAssignmentRoutes } from './metaAccountAssignmentRout
 import { registerPerformanceRoutes } from './performanceRoutes.js';
 import { registerSupportRoutes } from './supportRoutes.js';
 import { registerWorkspaceRoutes } from './workspaceRoutes.js';
+import { registerWorkspaceSafetyHooks } from './workspaceSafetyHooks.js';
 import { registerBreakdownRoutes } from './breakdownRoutes.js';
 import { registerTenantIsolation } from './tenantIsolation.js';
 import { registerDestructiveAdminRoutes } from './destructiveAdminRoutes.js';
@@ -44,6 +45,7 @@ export async function buildApp() {
   await app.register(jwt, { secret: env.jwtSecret });
   await app.register(rateLimit, { max: 180, timeWindow: '1 minute' });
   await registerTenantIsolation(app);
+  await registerWorkspaceSafetyHooks(app);
 
   await registerDatabaseDiagnostics(app);
   await registerWhatsappDiagnostics(app);
