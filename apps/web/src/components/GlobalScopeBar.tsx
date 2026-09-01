@@ -77,13 +77,28 @@ export default function GlobalScopeBar() {
   }, []);
 
   const businesses = useMemo(
-    () => scope.businesses.filter((item) => item.clientId === scope.clientId),
+    () => scope.businesses.filter((item) => item.clientId === scope.clientId && item.status !== 'inactive'),
     [scope.businesses, scope.clientId],
   );
   const accounts = useMemo(
     () => scope.accounts.filter((item) => item.clientId === scope.clientId && item.isAssigned && item.isActive && (!scope.businessId || item.businessId === scope.businessId)),
     [scope.accounts, scope.clientId, scope.businessId],
   );
+
+  useEffect(() => {
+    if (!businesses.length) return;
+    if (!businesses.some((item) => item.metaBusinessId === scope.businessId)) {
+      scope.setBusinessId(businesses[0].metaBusinessId);
+    }
+  }, [businesses, scope.businessId]);
+
+  useEffect(() => {
+    if (!accounts.length) return;
+    if (!accounts.some((item) => item.id === scope.adAccountId)) {
+      scope.setAdAccountId(accounts[0].id);
+    }
+  }, [accounts, scope.adAccountId]);
+
   const clientGroups = useMemo(() => {
     const map = new Map<string, ScopeClient[]>();
     for (const client of scope.clients) {
@@ -97,6 +112,30 @@ export default function GlobalScopeBar() {
       .sort((a, b) => contactLabel(a.clients[0]).localeCompare(contactLabel(b.clients[0]), 'pt-BR'));
   }, [scope.clients]);
 
+  const scopeCounts = useMemo(() => {
+    const map = new Map<string, { businesses: number; accounts: number }>();
+    for (const client of scope.clients) map.set(client.id, { businesses: 0, accounts: 0 });
+    for (const business of scope.businesses) {
+      if (business.status === 'inactive') continue;
+      const current = map.get(business.clientId) || { businesses: 0, accounts: 0 };
+      current.businesses += 1;
+      map.set(business.clientId, current);
+    }
+    for (const account of scope.accounts) {
+      if (!account.isAssigned || !account.isActive) continue;
+      const current = map.get(account.clientId) || { businesses: 0, accounts: 0 };
+      current.accounts += 1;
+      map.set(account.clientId, current);
+    }
+    return map;
+  }, [scope.clients, scope.businesses, scope.accounts]);
+
+  function companyLabel(client: ScopeClient) {
+    const counts = scopeCounts.get(client.id) || { businesses: 0, accounts: 0 };
+    if (!counts.businesses && !counts.accounts) return client.name;
+    return `${client.name} · ${counts.businesses} BM${counts.businesses === 1 ? '' : 's'} · ${counts.accounts} conta${counts.accounts === 1 ? '' : 's'}`;
+  }
+
   return (
     <div className="scope-bar border-b border-[#e2e7e4] bg-[#fafbfa] px-3 py-2.5 sm:px-4 md:px-6">
       <div className="flex min-w-0 flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between">
@@ -108,32 +147,31 @@ export default function GlobalScopeBar() {
               {!scope.clients.length && <option value="">Nenhuma empresa</option>}
               {clientGroups.map((group) => group.clients.length > 1
                 ? <optgroup key={group.key} label={`Cliente · ${contactLabel(group.clients[0])}`}>
-                    {group.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+                    {group.clients.map((client) => <option key={client.id} value={client.id}>{companyLabel(client)}</option>)}
                   </optgroup>
-                : group.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>))}
+                : group.clients.map((client) => <option key={client.id} value={client.id}>{companyLabel(client)}</option>))}
             </select>
           </label>
           <label className="relative min-w-0">
             <span className="sr-only">Gerenciador de Negócios</span>
             <BriefcaseBusiness size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <select value={scope.businessId} disabled={scope.tenantLocked} onChange={(event) => scope.setBusinessId(event.target.value)} className="scope-select h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd] disabled:bg-[#f2f4f2]">
-              {!businesses.length && <option value="">Gerenciador não vinculado</option>}
-              {!scope.tenantLocked && <option value="">Todos os Gerenciadores de Negócios</option>}
+            <select value={scope.businessId} disabled={scope.tenantLocked || !businesses.length} onChange={(event) => scope.setBusinessId(event.target.value)} className="scope-select h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd] disabled:bg-[#f2f4f2]">
+              {!businesses.length && <option value="">BM não vinculada</option>}
               {businesses.map((business) => <option key={business.id} value={business.metaBusinessId}>{business.name}</option>)}
             </select>
           </label>
           <label className="relative min-w-0">
             <span className="sr-only">Conta de anúncios</span>
             <CreditCard size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <select value={scope.adAccountId} onChange={(event) => scope.setAdAccountId(event.target.value)} className="scope-select h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd]">
-              <option value="">Todas as contas autorizadas</option>
+            <select value={scope.adAccountId} disabled={!accounts.length} onChange={(event) => scope.setAdAccountId(event.target.value)} className="scope-select h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd] disabled:bg-[#f2f4f2]">
+              {!accounts.length && <option value="">Conta não vinculada</option>}
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}</option>)}
             </select>
           </label>
         </div>
         <div className="flex shrink-0 items-center justify-between gap-2 xl:justify-end">
-          {error ? <span className="scope-feedback text-[10px] font-medium text-amber-700">{error}</span> : <span className="scope-feedback text-[10px] text-slate-400">Escopo aplicado em toda a plataforma</span>}
-          <button type="button" onClick={() => { void refreshFromMeta(); }} disabled={loading} className="grid h-9 w-9 place-items-center rounded-[7px] border border-[#d9e0dc] bg-white text-slate-500 hover:border-[#bfdbfe] hover:bg-[#eff6ff] hover:text-[#2563eb] disabled:opacity-50" title={isAdmin ? 'Buscar novamente os Gerenciadores de Negócios e contas na Meta' : 'Atualizar empresas e Gerenciadores de Negócios'}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
+          {error ? <span className="scope-feedback text-[10px] font-medium text-amber-700">{error}</span> : <span className="scope-feedback text-[10px] text-slate-400">Escopo separado por empresa, BM e conta</span>}
+          <button type="button" onClick={() => { void refreshFromMeta(); }} disabled={loading} className="grid h-9 w-9 place-items-center rounded-[7px] border border-[#d9e0dc] bg-white text-slate-500 hover:border-[#bfdbfe] hover:bg-[#eff6ff] hover:text-[#2563eb] disabled:opacity-50" title={isAdmin ? 'Atualizar somente as BMs já vinculadas desta empresa' : 'Atualizar empresa, BM e conta'}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
         </div>
       </div>
     </div>

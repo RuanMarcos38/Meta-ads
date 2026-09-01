@@ -218,4 +218,9 @@ export const env = {
     redirectUri: metaRedirectUri,
     apiVersion: normalizeMetaApiVersion(process.env.META_API_VERSION),
   },
+  whatsapp: {
+    baseUrl: process.env.EVOLUTION_API_URL?.trim() || process.env.WHATSAPP_API_URL?.trim() || '',
+    apiKey: process.env.EVOLUTION_API_KEY?.trim() || process.env.WHATSAPP_API_KEY?.trim() || '',
+    instance: process.env.EVOLUTION_INSTANCE?.trim() || process.env.WHATSAPP_INSTANCE?.trim() || '',
+  },
 };

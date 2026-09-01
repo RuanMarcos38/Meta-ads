@@ -1,17 +1,21 @@
 import { buildApp } from './app.js';
 import { env } from './config/env.js';
 import { startMetaSyncScheduler } from './modules/meta/syncScheduler.js';
+import { startNotificationScheduler } from './modules/notifications/notificationScheduler.js';
 
 async function main() {
   const app = await buildApp();
-  let stopScheduler: () => void = () => {};
+  let stopMetaScheduler: () => void = () => {};
+  let stopNotificationScheduler: () => void = () => {};
 
   app.addHook('onClose', async () => {
-    stopScheduler();
+    stopMetaScheduler();
+    stopNotificationScheduler();
   });
 
   await app.listen({ port: env.port, host: '0.0.0.0' });
-  stopScheduler = startMetaSyncScheduler(app.log);
+  stopMetaScheduler = startMetaSyncScheduler(app.log);
+  stopNotificationScheduler = startNotificationScheduler(app.log);
   app.log.info(`API rodando na porta ${env.port} | DEMO_MODE=${env.demoMode}`);
 }
 
