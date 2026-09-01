@@ -132,6 +132,7 @@ suite('API integration flow', () => {
       ],
     });
 
+    const multiEmail = 'multiempresa-ci@example.com';
     const password = 'MultiEmpresa#2026!';
     const created = await app.inject({
       method: 'POST',
@@ -139,7 +140,7 @@ suite('API integration flow', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: {
         name: 'Usuário Multiempresa CI',
-        email: 'multiempresa-ci@example.com',
+        email: multiEmail,
         password,
         role: 'CLIENT',
         clientId: primary.id,
@@ -150,18 +151,31 @@ suite('API integration flow', () => {
     expect(created.statusCode).toBe(200);
     expect(created.json().data.clientIds).toEqual(expect.arrayContaining([primary.id, secondary.id]));
 
+    const persisted = await prisma.user.findUnique({
+      where: { email: multiEmail },
+      select: { clientId: true, businessId: true, clientIdsJson: true, mustChangePassword: true },
+    });
+    expect(persisted?.clientId).toBe(primary.id);
+    expect(persisted?.businessId).toBe('bm-multi-a');
+    expect(persisted?.clientIdsJson).toEqual(expect.arrayContaining([primary.id, secondary.id]));
+    expect(persisted?.mustChangePassword).toBe(true);
+
     const visibleFromSecondary = await app.inject({
       method: 'GET',
       url: `/workspace/users?clientId=${secondary.id}`,
       headers: { authorization: `Bearer ${token}` },
     });
     expect(visibleFromSecondary.statusCode).toBe(200);
-    expect(visibleFromSecondary.json().data.some((item: { email: string }) => item.email === 'multiempresa-ci@example.com')).toBe(true);
+    expect(visibleFromSecondary.json().data.some((item: { email: string }) => item.email === multiEmail)).toBe(true);
+
+    // O produto mantém a política já existente de troca obrigatória da senha temporária.
+    // Para este teste de escopo, liberamos apenas o usuário efêmero criado no banco isolado de CI.
+    await prisma.user.update({ where: { email: multiEmail }, data: { mustChangePassword: false } });
 
     const login = await app.inject({
       method: 'POST',
       url: '/auth/login',
-      payload: { email: 'multiempresa-ci@example.com', password },
+      payload: { email: multiEmail, password },
     });
     expect(login.statusCode).toBe(200);
     const multiToken = login.json().data.token as string;
