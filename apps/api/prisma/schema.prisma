@@ -46,7 +46,7 @@ model Organization {
   name             String
   document         String?
   email            String?
-  phone            String?
+  phone             String?
   users            User[]
   clients          Client[]
   businessManagers BusinessManager[]
@@ -65,6 +65,7 @@ model User {
   clientId           String?
   client             Client?       @relation(fields: [clientId], references: [id])
   businessId         String?
+  clientIdsJson      Json?
   isActive           Boolean       @default(true)
   mustChangePassword Boolean       @default(false)
   lastLoginAt        DateTime?
@@ -256,7 +257,7 @@ model InsightDaily {
   clientId             String
   adAccountId          String
   campaignId           String?
-  adSetId              String?
+  adSetId               String?
   adId                 String?
   level                InsightLevel
   date                 DateTime
