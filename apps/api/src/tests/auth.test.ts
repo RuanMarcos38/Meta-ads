@@ -9,14 +9,24 @@ const baseUser = {
 const EMPTY_TENANT_UUID = '00000000-0000-0000-0000-000000000000';
 
 describe('scopeClient', () => {
-  it('ignora clientId solicitado por usuário CLIENT', () => {
+  it('ignora clientId solicitado por usuário CLIENT de empresa única', () => {
     expect(scopeClient({ ...baseUser, role: 'CLIENT', clientId: 'client-a' }, 'client-b'))
       .toBe('client-a');
   });
 
-  it('restringe MANAGER ao cliente atribuído', () => {
+  it('restringe MANAGER de empresa única ao cliente atribuído', () => {
     expect(scopeClient({ ...baseUser, role: 'MANAGER', clientId: 'client-a' }, 'client-b'))
       .toBe('client-a');
+  });
+
+  it('permite CLIENT multiempresa selecionar outra empresa explicitamente vinculada', () => {
+    expect(scopeClient({ ...baseUser, role: 'CLIENT', clientId: 'client-a', clientIds: ['client-a', 'client-b'] }, 'client-b'))
+      .toBe('client-b');
+  });
+
+  it('bloqueia CLIENT multiempresa ao solicitar empresa não vinculada', () => {
+    expect(scopeClient({ ...baseUser, role: 'CLIENT', clientId: 'client-a', clientIds: ['client-a', 'client-b'] }, 'client-c'))
+      .toBe(EMPTY_TENANT_UUID);
   });
 
   it('nunca libera consolidado para CLIENT sem empresa atribuída', () => {

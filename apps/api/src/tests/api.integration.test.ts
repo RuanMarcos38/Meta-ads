@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
+import { prisma } from '../shared/prisma.js';
 
 const integrationEnabled = process.env.RUN_INTEGRATION_TESTS === 'true';
 const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@r2rmarketingdigital.com.br';
@@ -113,6 +114,96 @@ suite('API integration flow', () => {
 
     expect(listed.statusCode).toBe(200);
     expect(listed.json().data.some((client: { name: string }) => client.name === 'Cliente Integração CI')).toBe(true);
+  });
+
+  it('mantém um único login com acesso seguro a múltiplas empresas e BMs', async () => {
+    const admin = await prisma.user.findUnique({ where: { email: adminEmail }, select: { organizationId: true } });
+    expect(admin?.organizationId).toBeTruthy();
+    const organizationId = admin!.organizationId!;
+
+    const primary = await prisma.client.create({ data: { organizationId, name: 'Empresa Multi A' } });
+    const secondary = await prisma.client.create({ data: { organizationId, name: 'Empresa Multi B' } });
+    const forbidden = await prisma.client.create({ data: { organizationId, name: 'Empresa Fora do Acesso' } });
+
+    await prisma.businessManager.createMany({
+      data: [
+        { organizationId, clientId: primary.id, metaBusinessId: 'bm-multi-a', name: 'BM Multi A', status: 'active' },
+        { organizationId, clientId: secondary.id, metaBusinessId: 'bm-multi-b', name: 'BM Multi B', status: 'active' },
+      ],
+    });
+
+    const multiEmail = 'multiempresa-ci@example.com';
+    const password = 'MultiEmpresa#2026!';
+    const created = await app.inject({
+      method: 'POST',
+      url: '/workspace/users',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Usuário Multiempresa CI',
+        email: multiEmail,
+        password,
+        role: 'CLIENT',
+        clientId: primary.id,
+        businessId: 'bm-multi-a',
+        clientIds: [primary.id, secondary.id],
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    expect(created.json().data.clientIds).toEqual(expect.arrayContaining([primary.id, secondary.id]));
+
+    const persisted = await prisma.user.findUnique({
+      where: { email: multiEmail },
+      select: { clientId: true, businessId: true, clientIdsJson: true, mustChangePassword: true },
+    });
+    expect(persisted?.clientId).toBe(primary.id);
+    expect(persisted?.businessId).toBe('bm-multi-a');
+    expect(persisted?.clientIdsJson).toEqual(expect.arrayContaining([primary.id, secondary.id]));
+    expect(persisted?.mustChangePassword).toBe(true);
+
+    const visibleFromSecondary = await app.inject({
+      method: 'GET',
+      url: `/workspace/users?clientId=${secondary.id}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(visibleFromSecondary.statusCode).toBe(200);
+    expect(visibleFromSecondary.json().data.some((item: { email: string }) => item.email === multiEmail)).toBe(true);
+
+    // O produto mantém a política já existente de troca obrigatória da senha temporária.
+    // Para este teste de escopo, liberamos apenas o usuário efêmero criado no banco isolado de CI.
+    await prisma.user.update({ where: { email: multiEmail }, data: { mustChangePassword: false } });
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: multiEmail, password },
+    });
+    expect(login.statusCode).toBe(200);
+    const multiToken = login.json().data.token as string;
+
+    const context = await app.inject({
+      method: 'GET',
+      url: '/workspace/context',
+      headers: { authorization: `Bearer ${multiToken}` },
+    });
+    expect(context.statusCode).toBe(200);
+    expect(context.json().data.tenantLocked).toBe(false);
+    expect(context.json().data.clients.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining([primary.id, secondary.id]));
+    expect(context.json().data.businesses.map((item: { metaBusinessId: string }) => item.metaBusinessId)).toEqual(expect.arrayContaining(['bm-multi-a', 'bm-multi-b']));
+
+    const secondaryManagers = await app.inject({
+      method: 'GET',
+      url: `/workspace/business-managers?clientId=${secondary.id}`,
+      headers: { authorization: `Bearer ${multiToken}` },
+    });
+    expect(secondaryManagers.statusCode).toBe(200);
+    expect(secondaryManagers.json().data.some((item: { metaBusinessId: string }) => item.metaBusinessId === 'bm-multi-b')).toBe(true);
+
+    const blocked = await app.inject({
+      method: 'GET',
+      url: `/workspace/context?clientId=${forbidden.id}`,
+      headers: { authorization: `Bearer ${multiToken}` },
+    });
+    expect(blocked.statusCode).toBe(403);
   });
 
   it('carrega dashboard, campanhas e executa sincronização em modo de teste', async () => {

@@ -1,10 +1,11 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import dayjs from 'dayjs';
 import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
 import { prisma } from './shared/prisma.js';
-import { requireAuth, scopeClient, type AuthUser } from './shared/auth.js';
+import { authorizedClientIds, canAccessBusiness, canAccessClient, hasMultiClientAccess, requireAuth, scopeClient, type AuthUser } from './shared/auth.js';
 import { ok, fail } from './shared/response.js';
 import { decrypt } from './shared/crypto.js';
 import { hashPassword } from './shared/password.js';
@@ -15,12 +16,22 @@ const adminRoles = ['SUPER_ADMIN', 'AGENCY_ADMIN'] as const;
 const tenantRoles = new Set(['CLIENT', 'MANAGER']);
 const dateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
+function linkedClientIds(clientId?: string | null, clientIdsJson?: unknown) {
+  const extra = Array.isArray(clientIdsJson)
+    ? clientIdsJson.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+  return Array.from(new Set([...(clientId ? [clientId] : []), ...extra]));
+}
+
 function effectiveClientId(user: AuthUser, requested?: string) {
   return scopeClient(user, requested);
 }
 
 function effectiveBusinessId(user: AuthUser, requested?: string) {
-  if (tenantRoles.has(user.role)) return user.businessId || '__NO_BUSINESS__';
+  if (tenantRoles.has(user.role)) {
+    if (hasMultiClientAccess(user)) return requested;
+    return user.businessId || '__NO_BUSINESS__';
+  }
   return requested;
 }
 
@@ -47,6 +58,31 @@ async function ensureClientAccess(user: AuthUser, clientId: string, reply: Fasti
     return null;
   }
   return client;
+}
+
+async function validateClientLinks(organizationId: string, clientIds: string[], reply: FastifyReply) {
+  if (!clientIds.length) return true;
+  const found = await prisma.client.findMany({
+    where: { organizationId, id: { in: clientIds } },
+    select: { id: true },
+  });
+  if (found.length !== clientIds.length) {
+    reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Uma ou mais empresas selecionadas não pertencem a esta organização.'));
+    return false;
+  }
+  return true;
+}
+
+async function validatePrimaryBusiness(organizationId: string, clientId: string, businessId: string, reply: FastifyReply) {
+  const bm = await prisma.businessManager.findFirst({
+    where: { organizationId, clientId, metaBusinessId: businessId },
+    select: { id: true },
+  });
+  if (!bm) {
+    reply.code(404).send(fail('BUSINESS_NOT_FOUND', 'BM não encontrada para a empresa principal.'));
+    return false;
+  }
+  return true;
 }
 
 async function syncBusinessDirectory(user: AuthUser, clientId: string) {
@@ -249,14 +285,25 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const user = req.user as AuthUser;
     const query = z.object({ clientId: z.string().uuid().optional() }).safeParse(req.query);
     if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Filtro de empresa inválido.'));
-    const lockedClientId = effectiveClientId(user, query.data.clientId);
-    const lockedBusinessId = effectiveBusinessId(user);
-    if (tenantRoles.has(user.role) && (!lockedClientId || lockedBusinessId === '__NO_BUSINESS__')) {
+
+    const tenant = tenantRoles.has(user.role);
+    const multiClient = tenant && hasMultiClientAccess(user);
+    if (tenant && query.data.clientId && !canAccessClient(user, query.data.clientId)) {
+      return reply.code(403).send(fail('FORBIDDEN', 'Esta empresa não pertence ao acesso do usuário.'));
+    }
+
+    const lockedClientId = multiClient ? undefined : effectiveClientId(user, query.data.clientId);
+    const lockedBusinessId = multiClient ? undefined : effectiveBusinessId(user);
+    if (tenant && !multiClient && (!lockedClientId || lockedBusinessId === '__NO_BUSINESS__')) {
       return reply.code(403).send(fail('TENANT_SCOPE_REQUIRED', 'Este acesso precisa estar vinculado a uma empresa e uma BM.'));
     }
 
+    const allowedClientIds = multiClient ? authorizedClientIds(user) : [];
     const clients = await prisma.client.findMany({
-      where: { organizationId: user.organizationId!, ...(lockedClientId ? { id: lockedClientId } : {}) },
+      where: {
+        organizationId: user.organizationId!,
+        ...(multiClient ? { id: { in: allowedClientIds } } : lockedClientId ? { id: lockedClientId } : {}),
+      },
       select: {
         id: true, name: true, companyName: true, email: true, status: true,
         _count: { select: { users: true, adAccounts: true, businessManagers: true } },
@@ -269,7 +316,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
         organizationId: user.organizationId!,
         clientId: { in: clientIds },
         status: 'active',
-        ...(lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? { metaBusinessId: lockedBusinessId } : {}),
+        ...(!multiClient && lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? { metaBusinessId: lockedBusinessId } : {}),
       },
       orderBy: [{ clientId: 'asc' }, { name: 'asc' }],
     }) : [];
@@ -277,8 +324,8 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       where: {
         organizationId: user.organizationId!,
         clientId: { in: clientIds },
-        ...(tenantRoles.has(user.role) ? { isAssigned: true } : {}),
-        ...(lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? { businessId: lockedBusinessId } : {}),
+        ...(tenant ? { isAssigned: true } : {}),
+        ...(!multiClient && lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? { businessId: lockedBusinessId } : {}),
       },
       select: {
         id: true, clientId: true, businessManagerId: true, businessId: true, businessName: true,
@@ -290,9 +337,10 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
 
     return ok({
       role: user.role,
-      tenantLocked: tenantRoles.has(user.role),
-      selectedClientId: lockedClientId || null,
-      selectedBusinessId: lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? lockedBusinessId : null,
+      tenantLocked: tenant && !multiClient,
+      multiClient,
+      selectedClientId: multiClient ? (query.data.clientId || null) : lockedClientId || null,
+      selectedBusinessId: multiClient ? null : lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? lockedBusinessId : null,
       clients,
       businesses,
       accounts,
@@ -324,10 +372,10 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
 
   app.get('/workspace/business-managers', { preHandler: requireAuth() }, async (req, reply) => {
     const user = req.user as AuthUser;
-    const query = z.object({ clientId: z.string().uuid().optional() }).safeParse(req.query);
+    const query = z.object({ clientId: z.string().uuid().optional(), businessId: z.string().optional() }).safeParse(req.query);
     if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Empresa inválida.'));
     const clientId = effectiveClientId(user, query.data.clientId);
-    const businessId = effectiveBusinessId(user);
+    const businessId = effectiveBusinessId(user, query.data.businessId);
     if (tenantRoles.has(user.role) && (!clientId || businessId === '__NO_BUSINESS__')) return reply.code(403).send(fail('TENANT_SCOPE_REQUIRED', 'BM não vinculada ao usuário.'));
     const businesses = await prisma.businessManager.findMany({
       where: {
@@ -430,12 +478,17 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     const user = req.user as AuthUser;
     const query = z.object({ clientId: z.string().uuid().optional() }).safeParse(req.query);
     if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Empresa inválida.'));
+    if (tenantRoles.has(user.role) && query.data.clientId && !canAccessClient(user, query.data.clientId)) {
+      return reply.code(403).send(fail('FORBIDDEN', 'Empresa fora do seu acesso.'));
+    }
     const clientId = effectiveClientId(user, query.data.clientId);
-    const rows = await prisma.user.findMany({
-      where: { organizationId: user.organizationId!, ...(clientId ? { clientId } : {}) },
-      select: { id: true, name: true, email: true, role: true, clientId: true, businessId: true, isActive: true, mustChangePassword: true, lastLoginAt: true, createdAt: true },
+    const allRows = await prisma.user.findMany({
+      where: { organizationId: user.organizationId! },
+      select: { id: true, name: true, email: true, role: true, clientId: true, businessId: true, clientIdsJson: true, isActive: true, mustChangePassword: true, lastLoginAt: true, createdAt: true },
       orderBy: [{ clientId: 'asc' }, { name: 'asc' }],
     });
+    const rows = (clientId ? allRows.filter((row) => linkedClientIds(row.clientId, row.clientIdsJson).includes(clientId)) : allRows)
+      .map(({ clientIdsJson, ...row }) => ({ ...row, clientIds: linkedClientIds(row.clientId, clientIdsJson) }));
     return ok(rows);
   });
 
@@ -447,18 +500,23 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       password: z.string().min(10).max(200),
       role: z.enum(['AGENCY_ADMIN', 'MANAGER', 'CLIENT']),
       clientId: z.string().uuid().nullable().optional(),
+      clientIds: z.array(z.string().uuid()).max(50).optional(),
       businessId: z.string().nullable().optional(),
     }).safeParse(req.body);
     if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Dados do usuário inválidos.'));
-    if (['MANAGER', 'CLIENT'].includes(body.data.role) && (!body.data.clientId || !body.data.businessId)) return reply.code(400).send(fail('BUSINESS_REQUIRED', 'Cliente/Gestor precisa estar vinculado a uma empresa e BM.'));
-    if (body.data.clientId) {
-      const client = await prisma.client.findFirst({ where: { id: body.data.clientId, organizationId: user.organizationId! } });
-      if (!client) return reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Empresa não encontrada.'));
-      if (body.data.businessId) {
-        const bm = await prisma.businessManager.findFirst({ where: { organizationId: user.organizationId!, clientId: client.id, metaBusinessId: body.data.businessId } });
-        if (!bm) return reply.code(404).send(fail('BUSINESS_NOT_FOUND', 'BM não encontrada para esta empresa.'));
-      }
-    }
+
+    const tenantRole = ['MANAGER', 'CLIENT'].includes(body.data.role);
+    if (tenantRole && (!body.data.clientId || !body.data.businessId)) return reply.code(400).send(fail('BUSINESS_REQUIRED', 'Cliente/Gestor precisa estar vinculado a uma empresa e BM principal.'));
+
+    const selectedClientIds = tenantRole
+      ? linkedClientIds(body.data.clientId || null, body.data.clientIds || [])
+      : [];
+    if (!(await validateClientLinks(user.organizationId!, selectedClientIds, reply))) return;
+    if (tenantRole && body.data.clientId && body.data.businessId && !(await validatePrimaryBusiness(user.organizationId!, body.data.clientId, body.data.businessId, reply))) return;
+
+    const existingEmail = await prisma.user.findUnique({ where: { email: body.data.email.trim().toLowerCase() }, select: { id: true } });
+    if (existingEmail) return reply.code(409).send(fail('USER_EMAIL_EXISTS', 'Já existe um usuário cadastrado com este e-mail. Edite o acesso existente para adicionar empresas.'));
+
     const created = await prisma.user.create({
       data: {
         name: body.data.name,
@@ -466,36 +524,69 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
         passwordHash: await hashPassword(body.data.password),
         role: body.data.role,
         organizationId: user.organizationId!,
-        clientId: body.data.clientId || null,
-        businessId: body.data.businessId || null,
+        clientId: tenantRole ? body.data.clientId || null : null,
+        businessId: tenantRole ? body.data.businessId || null : null,
+        ...(selectedClientIds.length > 1 ? { clientIdsJson: selectedClientIds } : {}),
         mustChangePassword: true,
       },
-      select: { id: true, name: true, email: true, role: true, clientId: true, businessId: true, isActive: true, mustChangePassword: true },
+      select: { id: true, name: true, email: true, role: true, clientId: true, businessId: true, clientIdsJson: true, isActive: true, mustChangePassword: true },
     });
-    await prisma.auditLog.create({ data: { organizationId: user.organizationId, userId: user.id, businessId: created.businessId, action: 'CREATE_USER_ACCESS', entity: 'User', entityId: created.id, metadataJson: { email: created.email, role: created.role, clientId: created.clientId } } });
-    return ok(created, 'Acesso criado.');
+    const { clientIdsJson, ...createdUser } = created;
+    const createdClientIds = linkedClientIds(created.clientId, clientIdsJson);
+    await prisma.auditLog.create({ data: { organizationId: user.organizationId, userId: user.id, businessId: created.businessId, action: 'CREATE_USER_ACCESS', entity: 'User', entityId: created.id, metadataJson: { email: created.email, role: created.role, clientId: created.clientId, clientIds: createdClientIds } } });
+    return ok({ ...createdUser, clientIds: createdClientIds }, selectedClientIds.length > 1 ? 'Acesso multiempresa criado.' : 'Acesso criado.');
   });
 
   app.patch('/workspace/users/:id', { preHandler: requireAuth([...adminRoles]) }, async (req, reply) => {
     const user = req.user as AuthUser;
     const params = z.object({ id: z.string().uuid() }).safeParse(req.params);
-    const body = z.object({ isActive: z.boolean().optional(), businessId: z.string().nullable().optional(), clientId: z.string().uuid().nullable().optional(), role: z.enum(['AGENCY_ADMIN', 'MANAGER', 'CLIENT']).optional(), password: z.string().min(10).max(200).optional() }).safeParse(req.body);
+    const body = z.object({
+      isActive: z.boolean().optional(),
+      businessId: z.string().nullable().optional(),
+      clientId: z.string().uuid().nullable().optional(),
+      clientIds: z.array(z.string().uuid()).max(50).optional(),
+      role: z.enum(['AGENCY_ADMIN', 'MANAGER', 'CLIENT']).optional(),
+      password: z.string().min(10).max(200).optional(),
+    }).safeParse(req.body);
     if (!params.success || !body.success) return reply.code(400).send(fail('VALIDATION', 'Alteração de acesso inválida.'));
     const existing = await prisma.user.findFirst({ where: { id: params.data.id, organizationId: user.organizationId! } });
     if (!existing) return reply.code(404).send(fail('USER_NOT_FOUND', 'Usuário não encontrado.'));
+
+    const finalRole = body.data.role || existing.role;
+    const tenantRole = ['MANAGER', 'CLIENT'].includes(finalRole);
+    const finalClientId = body.data.clientId !== undefined ? body.data.clientId : existing.clientId;
+    const finalBusinessId = body.data.businessId !== undefined ? body.data.businessId : existing.businessId;
+    if (tenantRole && (!finalClientId || !finalBusinessId)) return reply.code(400).send(fail('BUSINESS_REQUIRED', 'Cliente/Gestor precisa manter uma empresa e BM principal.'));
+
+    let finalClientIds: string[] = [];
+    if (tenantRole) {
+      finalClientIds = body.data.clientIds !== undefined
+        ? linkedClientIds(finalClientId, body.data.clientIds)
+        : body.data.clientId !== undefined
+          ? linkedClientIds(finalClientId, [])
+          : linkedClientIds(existing.clientId, existing.clientIdsJson);
+      if (!(await validateClientLinks(user.organizationId!, finalClientIds, reply))) return;
+      if (finalClientId && finalBusinessId && !(await validatePrimaryBusiness(user.organizationId!, finalClientId, finalBusinessId, reply))) return;
+    }
+
     const updated = await prisma.user.update({
       where: { id: existing.id },
       data: {
         ...(body.data.isActive !== undefined ? { isActive: body.data.isActive } : {}),
-        ...(body.data.businessId !== undefined ? { businessId: body.data.businessId } : {}),
-        ...(body.data.clientId !== undefined ? { clientId: body.data.clientId } : {}),
+        ...(tenantRole ? {
+          clientId: finalClientId,
+          businessId: finalBusinessId,
+          clientIdsJson: finalClientIds.length > 1 ? finalClientIds : Prisma.DbNull,
+        } : body.data.role === 'AGENCY_ADMIN' ? { clientId: null, businessId: null, clientIdsJson: Prisma.DbNull } : {}),
         ...(body.data.role ? { role: body.data.role } : {}),
         ...(body.data.password ? { passwordHash: await hashPassword(body.data.password), mustChangePassword: true } : {}),
       },
-      select: { id: true, name: true, email: true, role: true, clientId: true, businessId: true, isActive: true, mustChangePassword: true, lastLoginAt: true },
+      select: { id: true, name: true, email: true, role: true, clientId: true, businessId: true, clientIdsJson: true, isActive: true, mustChangePassword: true, lastLoginAt: true },
     });
-    await prisma.auditLog.create({ data: { organizationId: user.organizationId, userId: user.id, businessId: updated.businessId, action: 'UPDATE_USER_ACCESS', entity: 'User', entityId: updated.id, metadataJson: body.data } });
-    return ok(updated, 'Acesso atualizado.');
+    const { clientIdsJson, ...updatedUser } = updated;
+    const updatedClientIds = linkedClientIds(updated.clientId, clientIdsJson);
+    await prisma.auditLog.create({ data: { organizationId: user.organizationId, userId: user.id, businessId: updated.businessId, action: 'UPDATE_USER_ACCESS', entity: 'User', entityId: updated.id, metadataJson: { ...body.data, clientIds: updatedClientIds } } });
+    return ok({ ...updatedUser, clientIds: updatedClientIds }, 'Acesso atualizado.');
   });
 
   app.get('/workspace/audit', { preHandler: requireAuth([...adminRoles]) }, async (req, reply) => {
@@ -568,7 +659,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     if (!params.success) return reply.code(400).send(fail('VALIDATION', 'Alerta inválido.'));
     const alert = await prisma.alert.findFirst({ where: { id: params.data.id, organizationId: user.organizationId! } });
     if (!alert) return reply.code(404).send(fail('ALERT_NOT_FOUND', 'Alerta não encontrado.'));
-    if (tenantRoles.has(user.role) && (alert.clientId !== user.clientId || (alert.businessId && alert.businessId !== user.businessId))) return reply.code(403).send(fail('FORBIDDEN', 'Alerta fora do seu escopo.'));
+    if (tenantRoles.has(user.role) && (!alert.clientId || !canAccessBusiness(user, alert.clientId, alert.businessId))) return reply.code(403).send(fail('FORBIDDEN', 'Alerta fora do seu escopo.'));
     return ok(await prisma.alert.update({ where: { id: alert.id }, data: { isRead: true } }));
   });
 
@@ -619,7 +710,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     if (!params.success || !query.success) return reply.code(400).send(fail('VALIDATION', 'Exportação inválida.'));
     const report = await prisma.report.findFirst({ where: { id: params.data.id, organizationId: user.organizationId! } });
     if (!report) return reply.code(404).send(fail('REPORT_NOT_FOUND', 'Relatório não encontrado.'));
-    if (tenantRoles.has(user.role) && (report.clientId !== user.clientId || (report.businessId && report.businessId !== user.businessId))) return reply.code(403).send(fail('FORBIDDEN', 'Relatório fora do seu escopo.'));
+    if (tenantRoles.has(user.role) && !canAccessBusiness(user, report.clientId, report.businessId)) return reply.code(403).send(fail('FORBIDDEN', 'Relatório fora do seu escopo.'));
     const since = dayjs(report.periodStart).format('YYYY-MM-DD');
     const until = dayjs(report.periodEnd).format('YYYY-MM-DD');
     const rows = await campaignReportRows({ organizationId: user.organizationId!, clientId: report.clientId, businessId: report.businessId || undefined, adAccountId: report.adAccountId || undefined, since, until });
