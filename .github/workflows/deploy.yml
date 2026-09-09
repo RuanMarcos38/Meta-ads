@@ -24,7 +24,7 @@ jobs:
       EASYPANEL_WEBHOOK_URL: ${{ secrets.EASYPANEL_WEBHOOK_URL }}
       API_URL: https://api-gestao.r2rmarketingdigital.com.br
       FRONTEND_ORIGIN: https://gestao.r2rmarketingdigital.com.br
-      EXPECTED_RELEASE: 2026.08.31.4
+      EXPECTED_RELEASE: 2026.08.31.5
       TEST_ACCOUNT_UUID: e5d248a9-5dc1-486f-b1c8-0158c0f4a1d5
     steps:
       - name: Resolve optional EasyPanel deployment trigger
@@ -70,7 +70,7 @@ jobs:
               "${API_URL}/meta/client-accounts/${TEST_ACCOUNT_UUID}/assignment" || true
             methods="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="access-control-allow-methods" {print $2}' | tail -1)"
             current_release="$(printf '%s' "$capability" | jq -r '.data.version // empty' 2>/dev/null || true)"
-            if printf '%s' "$capability" | jq -e --arg release "$EXPECTED_RELEASE" '.success == true and .data.enabled == true and .data.version == $release and .data.liveBillingAndDeliveryStatus == true and .data.collaborativeInternalSupport == true' >/dev/null 2>&1 \
+            if printf '%s' "$capability" | jq -e --arg release "$EXPECTED_RELEASE" '.success == true and .data.enabled == true and .data.version == $release and .data.liveBillingAndDeliveryStatus == true and .data.collaborativeInternalSupport == true and .data.metaRateLimitSafe == true and .data.googleAnalyticsModule == true' >/dev/null 2>&1 \
               && printf '%s' "$methods" | grep -q 'PATCH' \
               && printf '%s' "$methods" | grep -q 'POST'; then
               echo "EasyPanel atualizado automaticamente e validado na release ${EXPECTED_RELEASE}. Métodos: ${methods}."

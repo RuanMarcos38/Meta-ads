@@ -38,39 +38,43 @@ jobs:
           TEST_ACCOUNT_UUID: e5d248a9-5dc1-486f-b1c8-0158c0f4a1d5
         run: |
           set -euo pipefail
-          headers="$(mktemp)"
-          status="$(curl -sS --connect-timeout 10 --max-time 20 -o /dev/null -D "$headers" -w '%{http_code}' \
-            -X OPTIONS \
-            -H "Origin: ${FRONTEND_ORIGIN}" \
-            -H "Access-Control-Request-Method: PATCH" \
-            -H "Access-Control-Request-Headers: authorization,content-type" \
-            "${API_URL}/meta/client-accounts/${TEST_ACCOUNT_UUID}/assignment")"
-          echo "Preflight HTTP ${status}"
-          tr -d '\r' < "$headers" | grep -i '^access-control-' || true
-          origin="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="access-control-allow-origin" {print $2}' | tail -1)"
-          methods="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="access-control-allow-methods" {print $2}' | tail -1)"
-          test "$origin" = "$FRONTEND_ORIGIN"
-          printf '%s' "$methods" | grep -q 'PATCH'
-          printf '%s' "$methods" | grep -q 'POST'
-          echo "Preflight da autorização Meta aceita PATCH e POST."
+          for attempt in $(seq 1 30); do
+            headers="$(mktemp)"
+            status="$(curl -sS --connect-timeout 10 --max-time 20 -o /dev/null -D "$headers" -w '%{http_code}' \
+              -X OPTIONS \
+              -H "Origin: ${FRONTEND_ORIGIN}" \
+              -H "Access-Control-Request-Method: PATCH" \
+              -H "Access-Control-Request-Headers: authorization,content-type" \
+              "${API_URL}/meta/client-accounts/${TEST_ACCOUNT_UUID}/assignment" || true)"
+            origin="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="access-control-allow-origin" {print $2}' | tail -1)"
+            methods="$(tr -d '\r' < "$headers" | awk -F': ' 'tolower($1)=="access-control-allow-methods" {print $2}' | tail -1)"
+            if [ "$origin" = "$FRONTEND_ORIGIN" ] && printf '%s' "$methods" | grep -q 'PATCH' && printf '%s' "$methods" | grep -q 'POST'; then
+              echo "Preflight HTTP ${status}; autorização Meta aceita PATCH e POST."
+              exit 0
+            fi
+            echo "Tentativa ${attempt}/30: API/CORS ainda indisponível durante deploy."
+            sleep 10
+          done
+          echo "Preflight da autorização Meta não estabilizou."
+          exit 1
 
       - name: Check Meta account authorization backend
         env:
           API_URL: https://api-gestao.r2rmarketingdigital.com.br
-          EXPECTED_RELEASE: 2026.08.31.4
+          EXPECTED_RELEASE: 2026.08.31.5
         run: |
           set -euo pipefail
           for attempt in $(seq 1 30); do
             body="$(curl -fsSL --connect-timeout 10 --max-time 20 "${API_URL}/meta/account-assignment-capability?attempt=${attempt}" 2>/dev/null || true)"
-            if printf '%s' "$body" | jq -e --arg release "$EXPECTED_RELEASE" '.success == true and .data.enabled == true and .data.version == $release and .data.liveBillingAndDeliveryStatus == true and .data.collaborativeInternalSupport == true' >/dev/null 2>&1; then
-              echo "Backend publicado na versão ${EXPECTED_RELEASE}, com cobrança/status Meta e Atendimento colaborativo habilitados."
+            if printf '%s' "$body" | jq -e --arg release "$EXPECTED_RELEASE" '.success == true and .data.enabled == true and .data.version == $release and .data.liveBillingAndDeliveryStatus == true and .data.collaborativeInternalSupport == true and .data.metaRateLimitSafe == true and .data.googleAnalyticsModule == true' >/dev/null 2>&1; then
+              echo "Backend publicado na versão ${EXPECTED_RELEASE}, com Meta rate-limit safe e módulo Google Analytics habilitados."
               exit 0
             fi
             current_release="$(printf '%s' "$body" | jq -r '.data.version // empty' 2>/dev/null || true)"
-            echo "Tentativa ${attempt}/30: release atual=${current_release:-indisponível}; aguardando backend colaborativo."
+            echo "Tentativa ${attempt}/30: release atual=${current_release:-indisponível}; aguardando backend atual."
             sleep 10
           done
-          echo "O backend colaborativo da release ${EXPECTED_RELEASE} ainda não está publicado no EasyPanel."
+          echo "O backend da release ${EXPECTED_RELEASE} ainda não está publicado no EasyPanel."
           exit 1
 
       - name: Check API and database
