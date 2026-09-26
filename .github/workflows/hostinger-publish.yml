@@ -1,0 +1,62 @@
+name: Publish Hostinger Frontend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gestao-ads-hostinger-static
+  cancel-in-progress: true
+
+jobs:
+  publish-static-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build production frontend
+        working-directory: apps/web
+        env:
+          VITE_API_BASE_URL: https://api-gestao.r2rmarketingdigital.com.br
+        run: |
+          set -euo pipefail
+          npm install
+          npm run typecheck
+          npm run build
+          printf '%s\n' "$GITHUB_SHA" > dist/deploy-version.txt
+          test -s dist/index.html
+          test -s dist/.htaccess
+
+      - name: Publish deploy-ready static branch
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/hostinger-dist
+          mkdir -p /tmp/hostinger-dist
+          cp -a apps/web/dist/. /tmp/hostinger-dist/
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout --orphan hostinger-production
+          git rm -rf .
+          cp -a /tmp/hostinger-dist/. .
+          git add -A
+          git commit -m "deploy(hostinger): ${GITHUB_SHA}"
+          git push --force origin HEAD:hostinger-production
+
+      - name: Validate static branch contents
+        run: |
+          set -euo pipefail
+          test -s index.html
+          test -s .htaccess
+          test -s deploy-version.txt
+          test -d assets
+          echo "Branch hostinger-production pronta para publicação automática na Hostinger."
