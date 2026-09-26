@@ -136,7 +136,23 @@ jobs:
           FRONTEND_URL: https://gestao.r2rmarketingdigital.com.br
         run: |
           set -euo pipefail
-          status="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/frontend.html -w '%{http_code}' "${FRONTEND_URL}/")"
-          test "$status" = "200"
-          grep -qi '<html' /tmp/frontend.html
-          echo "Frontend público disponível. A confirmação do SHA exato continua no job SFTP quando as credenciais da Hostinger estiverem configuradas."
+          for attempt in $(seq 1 20); do
+            root_status="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/frontend-root.html -w '%{http_code}' "${FRONTEND_URL}/?deploy_attempt=${attempt}" || true)"
+            index_status="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/frontend-index.html -w '%{http_code}' "${FRONTEND_URL}/index.html?deploy_attempt=${attempt}" || true)"
+            version_status="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/frontend-version.txt -w '%{http_code}' "${FRONTEND_URL}/deploy-version.txt?deploy_attempt=${attempt}" || true)"
+            version="$(cat /tmp/frontend-version.txt 2>/dev/null || true)"
+            echo "Tentativa ${attempt}/20: root=${root_status} index=${index_status} deploy-version=${version_status} versão=${version}"
+            if [ "$root_status" = "200" ] && [ "$index_status" = "200" ] && grep -qi '<html' /tmp/frontend-root.html && grep -qi '<html' /tmp/frontend-index.html; then
+              echo "Frontend público disponível na Hostinger."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Frontend continua indisponível após aguardar a publicação da Hostinger."
+          echo "Resposta raiz:"
+          head -c 300 /tmp/frontend-root.html || true
+          echo
+          echo "Resposta index.html:"
+          head -c 300 /tmp/frontend-index.html || true
+          echo
+          exit 1
