@@ -47,6 +47,7 @@ jobs:
 
           git checkout --orphan hostinger-production
           git rm -rf .
+          git clean -fdx
           cp -a /tmp/hostinger-dist/. .
           git add -A
           git commit -m "deploy(hostinger): ${GITHUB_SHA}"
