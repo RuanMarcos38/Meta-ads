@@ -255,7 +255,7 @@ async function loadDirectory(organizationId: string, clientId: string) {
 }
 
 async function discoveryPayload(organizationId: string, clientId: string, directory: MetaBusinessDirectoryItem[]) {
-  const [managers, accounts] = await Promise.all([
+  const [managers, accounts, activeAssignments] = await Promise.all([
     prisma.businessManager.findMany({
       where: { organizationId, clientId },
       select: { metaBusinessId: true, status: true },
@@ -264,24 +264,44 @@ async function discoveryPayload(organizationId: string, clientId: string, direct
       where: { organizationId, clientId },
       select: { accountId: true, businessId: true, isAssigned: true },
     }),
+    prisma.businessManager.findMany({
+      where: {
+        organizationId,
+        status: 'active',
+        metaBusinessId: { in: directory.map((business) => business.businessId) },
+      },
+      select: {
+        metaBusinessId: true,
+        clientId: true,
+        client: { select: { name: true } },
+      },
+    }),
   ]);
   const activeBusinesses = new Set(managers.filter((item) => item.status === 'active').map((item) => item.metaBusinessId));
   const assignedAccounts = new Set(accounts.filter((item) => item.isAssigned).map((item) => `${item.businessId || ''}:${normalizedAccountId(item.accountId)}`));
+  const assignmentByBusiness = new Map(activeAssignments.map((item) => [item.metaBusinessId, item]));
 
-  return directory.map((business) => ({
-    businessId: business.businessId,
-    businessName: business.businessName,
-    adminEmail: preferredEmail(business),
-    selected: activeBusinesses.has(business.businessId),
-    accountCount: business.adAccounts.length,
-    accounts: business.adAccounts.map((account) => ({
-      accountId: normalizedAccountId(account.accountId),
-      name: account.name || `Conta ${normalizedAccountId(account.accountId)}`,
-      currency: account.currency || null,
-      accountStatus: account.accountStatus ?? null,
-      selected: assignedAccounts.has(`${business.businessId}:${normalizedAccountId(account.accountId)}`),
-    })),
-  }));
+  return directory.map((business) => {
+    const assignment = assignmentByBusiness.get(business.businessId);
+    const assignedElsewhere = Boolean(assignment && assignment.clientId !== clientId);
+    return {
+      businessId: business.businessId,
+      businessName: business.businessName,
+      adminEmail: preferredEmail(business),
+      selected: activeBusinesses.has(business.businessId),
+      available: !assignedElsewhere,
+      assignedClientId: assignedElsewhere ? assignment?.clientId || null : null,
+      assignedClientName: assignedElsewhere ? assignment?.client.name || null : null,
+      accountCount: business.adAccounts.length,
+      accounts: business.adAccounts.map((account) => ({
+        accountId: normalizedAccountId(account.accountId),
+        name: account.name || `Conta ${normalizedAccountId(account.accountId)}`,
+        currency: account.currency || null,
+        accountStatus: account.accountStatus ?? null,
+        selected: assignedAccounts.has(`${business.businessId}:${normalizedAccountId(account.accountId)}`),
+      })),
+    };
+  });
 }
 
 async function persistSelectedDirectory(input: {
@@ -497,21 +517,41 @@ async function refreshExistingSelection(input: {
   return { businesses: selectedDirectory.length, mappedAccounts, selectionRequired: false };
 }
 
-function newClientDiscoveryPayload(directory: MetaBusinessDirectoryItem[]) {
-  return directory.map((business) => ({
-    businessId: business.businessId,
-    businessName: business.businessName,
-    adminEmail: preferredEmail(business),
-    selected: false,
-    accountCount: business.adAccounts.length,
-    accounts: business.adAccounts.map((account) => ({
-      accountId: normalizedAccountId(account.accountId),
-      name: account.name || `Conta ${normalizedAccountId(account.accountId)}`,
-      currency: account.currency || null,
-      accountStatus: account.accountStatus ?? null,
+async function newClientDiscoveryPayload(organizationId: string, directory: MetaBusinessDirectoryItem[]) {
+  const activeAssignments = await prisma.businessManager.findMany({
+    where: {
+      organizationId,
+      status: 'active',
+      metaBusinessId: { in: directory.map((business) => business.businessId) },
+    },
+    select: {
+      metaBusinessId: true,
+      clientId: true,
+      client: { select: { name: true } },
+    },
+  });
+  const assignmentByBusiness = new Map(activeAssignments.map((item) => [item.metaBusinessId, item]));
+
+  return directory.map((business) => {
+    const assignment = assignmentByBusiness.get(business.businessId);
+    return {
+      businessId: business.businessId,
+      businessName: business.businessName,
+      adminEmail: preferredEmail(business),
       selected: false,
-    })),
-  }));
+      available: !assignment,
+      assignedClientId: assignment?.clientId || null,
+      assignedClientName: assignment?.client.name || null,
+      accountCount: business.adAccounts.length,
+      accounts: business.adAccounts.map((account) => ({
+        accountId: normalizedAccountId(account.accountId),
+        name: account.name || `Conta ${normalizedAccountId(account.accountId)}`,
+        currency: account.currency || null,
+        accountStatus: account.accountStatus ?? null,
+        selected: false,
+      })),
+    };
+  });
 }
 
 export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstance) {
@@ -521,7 +561,7 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
       const { resolution, directory, directorySource, warning } = await loadDirectory(user.organizationId!, '__new_client__');
       if (!resolution.connection) return reply.code(409).send(fail('META_CONNECTION_REQUIRED', connectionError(resolution)));
       return ok({
-        businesses: newClientDiscoveryPayload(directory),
+        businesses: await newClientDiscoveryPayload(user.organizationId!, directory),
         connectionSource: resolution.source,
         sourceClientId: resolution.sourceClientId,
         directorySource,
