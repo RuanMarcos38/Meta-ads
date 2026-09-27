@@ -43,11 +43,11 @@ export function canAccessClient(user: AuthUser, clientId?: string | null) {
   return authorizedClientIds(user).includes(clientId);
 }
 
-export function canAccessBusiness(user: AuthUser, clientId?: string | null, businessId?: string | null) {
+export function canAccessBusiness(user: AuthUser, clientId?: string | null, _businessId?: string | null) {
   if (!clientId || !canAccessClient(user, clientId)) return false;
-  if (!tenantRoles.has(user.role)) return true;
-  if (hasMultiClientAccess(user)) return true;
-  return !businessId || businessId === user.businessId;
+  // A BM efetivamente autorizada é validada pelo tenantIsolation contra o vínculo
+  // ativo BusinessManager -> Client. Aqui mantemos a checagem de posse da empresa.
+  return true;
 }
 
 export function requireAuth(roles?: string[]) {
