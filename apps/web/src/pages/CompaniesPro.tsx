@@ -458,7 +458,7 @@ export default function CompaniesPro() {
         </button>
       </div>}
 
-      {!newMetaConnectionRequired && <div className="mt-4 border-t border-[#e1e6e3] pt-4">
+      {!newMetaConnectionRequired && newBusinessLoaded && <div className="mt-4 border-t border-[#e1e6e3] pt-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="panel-title">Business Manager obrigatória</h2>
