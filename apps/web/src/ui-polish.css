@@ -601,3 +601,45 @@ select.scope-select {
     padding-top: 10px !important;
   }
 }
+
+
+/* Métricas legíveis em desktop/tablet/mobile sem sobreposição. */
+.metric-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.metric-value {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(17px, 1.55vw, 22px);
+  line-height: 1.15;
+}
+
+.metric-helper {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 1280px) and (max-width: 1599.98px) {
+  .metric-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1600px) {
+  .metric-grid {
+    grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 639.98px) {
+  .metric-value {
+    font-size: clamp(16px, 5vw, 20px);
+  }
+}
