@@ -73,6 +73,8 @@ export default function CompaniesPro() {
   const [newBusinesses, setNewBusinesses] = useState<BusinessChoice[]>([]);
   const [newBusinessLoaded, setNewBusinessLoaded] = useState(false);
   const [newBusinessLoading, setNewBusinessLoading] = useState(false);
+  const [newMetaConnectionRequired, setNewMetaConnectionRequired] = useState(false);
+  const [newMetaConnecting, setNewMetaConnecting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState('');
@@ -111,11 +113,15 @@ export default function CompaniesPro() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    if (canAdmin) void discoverNewBusinesses();
+  }, []);
 
   async function discoverNewBusinesses() {
     if (!canAdmin) return;
     setNewBusinessLoading(true);
+    setNewMetaConnectionRequired(false);
     setError('');
     try {
       const response = await api.post('/workspace/business-managers/discover-for-new-client', {});
@@ -136,7 +142,13 @@ export default function CompaniesPro() {
     } catch (err: any) {
       setNewBusinesses([]);
       setNewBusinessLoaded(false);
-      setError(err?.response?.data?.error?.message || 'Não foi possível carregar as Business Managers disponíveis.');
+      const code = err?.response?.data?.error?.code;
+      if (code === 'META_CONNECTION_REQUIRED') {
+        setNewMetaConnectionRequired(true);
+        setError('');
+      } else {
+        setError(err?.response?.data?.error?.message || 'Não foi possível carregar as Business Managers disponíveis.');
+      }
     } finally {
       setNewBusinessLoading(false);
     }
@@ -159,6 +171,38 @@ export default function CompaniesPro() {
       ...business,
       accounts: business.accounts.map((account) => account.accountId === accountId ? { ...account, selected: !account.selected } : account),
     }));
+  }
+
+  async function connectManagementForCompanies() {
+    setNewMetaConnecting(true);
+    setError('');
+    const popup = window.open('about:blank', 'gestao-ads-meta-oauth', 'width=760,height=860');
+    try {
+      const response = await api.get('/meta/oauth/start-management');
+      const authUrl = response.data?.data?.authUrl;
+      if (!authUrl) throw new Error('A Meta não retornou a URL de autorização.');
+      if (popup) popup.location.href = authUrl;
+      else window.location.assign(authUrl);
+
+      if (popup) {
+        await new Promise<void>((resolve) => {
+          const timer = window.setInterval(() => {
+            if (popup.closed) {
+              window.clearInterval(timer);
+              resolve();
+            }
+          }, 800);
+        });
+        setNewMetaConnectionRequired(false);
+        await discoverNewBusinesses();
+        if (editing) await loadEditBusinesses(editing.id);
+      }
+    } catch (err: any) {
+      popup?.close();
+      setError(err?.response?.data?.error?.message || err?.message || 'Não foi possível conectar a ferramenta à Meta.');
+    } finally {
+      setNewMetaConnecting(false);
+    }
   }
 
   async function create(e: React.FormEvent) {
@@ -254,7 +298,7 @@ export default function CompaniesPro() {
     setError('');
     const popup = window.open('about:blank', 'gestao-ads-meta-oauth', 'width=760,height=860');
     try {
-      const response = await api.get('/meta/oauth/start', { params: { clientId } });
+      const response = await api.get('/meta/oauth/start-management');
       const authUrl = response.data?.data?.authUrl;
       if (!authUrl) throw new Error('A Meta não retornou a URL de autorização.');
       if (popup) popup.location.href = authUrl;
@@ -269,6 +313,7 @@ export default function CompaniesPro() {
             }
           }, 800);
         });
+        setEditMetaConnectionRequired(false);
         await loadEditBusinesses(clientId);
         await load();
         window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
@@ -400,13 +445,20 @@ export default function CompaniesPro() {
     {canAdmin && <form onSubmit={create} className="filter-panel">
       <div className="flex flex-col gap-2 sm:flex-row">
         <input className="field-control flex-1" placeholder="Nome da nova empresa" value={name} onChange={(e) => setName(e.target.value)} required />
-        <button className="primary-button" disabled={newBusinessLoading || creating}>
+        <button className="primary-button" disabled={newBusinessLoading || creating || newMetaConnecting || !newBusinessLoaded}>
           {newBusinessLoading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
-          {newBusinessLoading ? 'Carregando BMs...' : newBusinessLoaded ? (creating ? 'Cadastrando...' : 'Cadastrar empresa') : 'Continuar: escolher BM'}
+          {newBusinessLoading ? 'Carregando BMs...' : creating ? 'Cadastrando...' : 'Cadastrar empresa'}
         </button>
       </div>
 
-      {newBusinessLoaded && <div className="mt-4 border-t border-[#e1e6e3] pt-4">
+      {newMetaConnectionRequired && <div className="message-warning mt-4 flex flex-wrap items-center justify-between gap-2">
+        <span>A ferramenta precisa estar conectada à Meta uma única vez para listar as BMs disponíveis. Depois cada BM será vinculada somente à empresa selecionada.</span>
+        <button type="button" className="primary-button" onClick={() => { void connectManagementForCompanies(); }} disabled={newMetaConnecting}>
+          <Link2 size={13} />{newMetaConnecting ? 'Conectando ferramenta...' : 'Conectar ferramenta à Meta'}
+        </button>
+      </div>}
+
+      {!newMetaConnectionRequired && newBusinessLoaded && <div className="mt-4 border-t border-[#e1e6e3] pt-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="panel-title">Business Manager obrigatória</h2>
@@ -472,9 +524,9 @@ export default function CompaniesPro() {
           {editBusinessLoading && <div className="empty-state"><RefreshCw size={18} className="animate-spin" /><span>Carregando BMs disponíveis na Meta...</span></div>}
 
           {!editBusinessLoading && editMetaConnectionRequired && <div className="message-warning flex flex-wrap items-center justify-between gap-2">
-            <span>Esta empresa ainda não possui conexão Meta ativa. Conecte a Meta para carregar as BMs diretamente dentro do cadastro.</span>
+            <span>A ferramenta ainda não possui conexão Meta global ativa. Conecte a ferramenta uma única vez; depois selecione aqui somente as BMs que pertencem a esta empresa.</span>
             <button type="button" className="primary-button" onClick={() => { void connectEditMeta(editing.id); }} disabled={editMetaConnecting}>
-              <Link2 size={13} />{editMetaConnecting ? 'Conectando...' : 'Conectar Meta'}
+              <Link2 size={13} />{editMetaConnecting ? 'Conectando ferramenta...' : 'Conectar ferramenta à Meta'}
             </button>
           </div>}
 

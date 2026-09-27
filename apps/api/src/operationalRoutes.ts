@@ -42,22 +42,10 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
     }
 
     const user = req.user as AuthUser;
-    const query = z.object({ clientId: z.string().uuid() }).safeParse(req.query);
-    if (!query.success) {
-      return reply.code(400).send(fail('CLIENT_REQUIRED', 'Informe um cliente válido para conectar à Meta.'));
-    }
-
-    const client = await prisma.client.findFirst({
-      where: { id: query.data.clientId, organizationId: user.organizationId! },
-      select: { id: true },
-    });
-    if (!client) return reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Cliente não encontrado para este acesso.'));
-
     const state = app.jwt.sign({
-      type: 'meta_oauth',
+      type: 'meta_management_oauth',
       userId: user.id,
       organizationId: user.organizationId,
-      clientId: client.id,
     }, { expiresIn: '10m' });
 
     const authUrl = new URL(`https://www.facebook.com/${env.meta.apiVersion}/dialog/oauth`);
@@ -67,7 +55,11 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('scope', META_MANAGEMENT_SCOPES.join(','));
 
-    return ok({ authUrl: authUrl.toString(), scopes: META_MANAGEMENT_SCOPES });
+    return ok({
+      authUrl: authUrl.toString(),
+      scopes: META_MANAGEMENT_SCOPES,
+      mode: 'organization',
+    });
   });
 
   app.get('/meta/status', { preHandler: requireAuth() }, async (req, reply) => {
