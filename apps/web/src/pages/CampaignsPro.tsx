@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarRange, ChevronRight, Filter, Layers3, Megaphone, MonitorSmartphone, Pause, Play, RefreshCw, Search, Target, UsersRound, X } from 'lucide-react';
+import { AlertTriangle, CalendarRange, ChevronRight, Filter, Layers3, Megaphone, MonitorSmartphone, Pause, Play, Plus, RefreshCw, Search, Target, UsersRound, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth, useScope } from '../store';
 
@@ -25,6 +26,21 @@ const dec = (v: unknown) => num(v).toLocaleString('pt-BR', { minimumFractionDigi
 const today = () => new Date().toISOString().slice(0, 10);
 const ago = (days: number) => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().slice(0, 10); };
 const statusTranslation: Record<string,string> = { ACTIVE:'Ativa', PAUSED:'Pausada', ARCHIVED:'Arquivada', DELETED:'Excluída', IN_PROCESS:'Processando', WITH_ISSUES:'Com problemas', PENDING_REVIEW:'Em análise', DISAPPROVED:'Reprovada', PREAPPROVED:'Pré-aprovada', PENDING_BILLING_INFO:'Aguardando cobrança', CAMPAIGN_PAUSED:'Campanha pausada', ADSET_PAUSED:'Conjunto pausado', PAYMENT_ERROR:'Erro de pagamento', NO_BALANCE:'Sem saldo', PAYMENT_PROCESSING:'Pagamento em processamento', ACCOUNT_REVIEW:'Em análise da conta', GRACE_PERIOD:'Período de carência', ACCOUNT_DISABLED:'Conta desativada' };
+const objectives = [
+  ['OUTCOME_LEADS', 'Leads'],
+  ['OUTCOME_TRAFFIC', 'Tráfego'],
+  ['OUTCOME_ENGAGEMENT', 'Engajamento'],
+  ['OUTCOME_SALES', 'Vendas'],
+  ['OUTCOME_AWARENESS', 'Reconhecimento'],
+  ['OUTCOME_APP_PROMOTION', 'Promoção do app'],
+] as const;
+const specialCategories = [
+  ['', 'Nenhuma categoria especial'],
+  ['HOUSING', 'Habitação'],
+  ['EMPLOYMENT', 'Emprego'],
+  ['CREDIT', 'Crédito'],
+  ['ISSUES_ELECTIONS_POLITICS', 'Questões sociais, eleições ou política'],
+] as const;
 function rowStatusKey(row: MetricRow) { return String(row.deliveryStatusKey || row.effectiveStatus || row.status || '').toUpperCase(); }
 function rowStatusLabel(row: MetricRow) { const key = rowStatusKey(row); return row.deliveryStatusLabel || statusTranslation[key] || key || '—'; }
 function statusClasses(row: MetricRow) {
@@ -39,6 +55,7 @@ function statusClasses(row: MetricRow) {
 export default function CampaignsPro() {
   const user = useAuth((state) => state.user);
   const scope = useScope();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canManage = ['SUPER_ADMIN', 'AGENCY_ADMIN', 'MANAGER'].includes(user?.role || '');
   const [tab, setTab] = useState<'campaigns' | 'adsets' | 'ads'>('campaigns');
   const [since, setSince] = useState(ago(29));
@@ -57,6 +74,14 @@ export default function CampaignsPro() {
   const [breakdownType, setBreakdownType] = useState<'age'|'gender'|'region'|'publisher_platform'|'device_platform'|'platform_position'>('age');
   const [breakdownRows, setBreakdownRows] = useState<BreakdownRow[]>([]);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [name, setName] = useState('');
+  const [objective, setObjective] = useState('OUTCOME_LEADS');
+  const [createAccountId, setCreateAccountId] = useState('');
+  const [dailyBudget, setDailyBudget] = useState('');
+  const [specialCategory, setSpecialCategory] = useState('');
 
   const base = useMemo(() => ({
     clientId: scope.clientId,
@@ -64,6 +89,31 @@ export default function CampaignsPro() {
     ...(scope.adAccountId ? { adAccountId: scope.adAccountId } : {}),
     since, until,
   }), [scope.clientId, scope.businessId, scope.adAccountId, since, until]);
+
+  const createAccounts = useMemo(
+    () => scope.accounts.filter((item) =>
+      item.clientId === scope.clientId
+      && item.isAssigned
+      && item.isActive
+      && (!scope.businessId || item.businessId === scope.businessId)
+    ),
+    [scope.accounts, scope.clientId, scope.businessId],
+  );
+
+  useEffect(() => {
+    const preferred = scope.adAccountId && createAccounts.some((item) => item.id === scope.adAccountId)
+      ? scope.adAccountId
+      : createAccounts[0]?.id || '';
+    if (!createAccounts.some((item) => item.id === createAccountId)) setCreateAccountId(preferred);
+  }, [createAccounts, createAccountId, scope.adAccountId]);
+
+  useEffect(() => {
+    if (!canManage || searchParams.get('nova') !== '1') return;
+    setShowCreate(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('nova');
+    setSearchParams(next, { replace: true });
+  }, [canManage, searchParams, setSearchParams]);
 
   async function loadOptions() {
     if (!scope.clientId) return;
@@ -121,10 +171,46 @@ export default function CampaignsPro() {
     });
   }, [rows, search, status, sort]);
 
+  async function createCampaign(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canManage || !scope.clientId || !scope.businessId || !createAccountId || !name.trim()) return;
+    setCreating(true);
+    setError('');
+    setNotice('');
+    try {
+      await api.post('/campaigns', {
+        clientId: scope.clientId,
+        businessId: scope.businessId,
+        adAccountId: createAccountId,
+        name: name.trim(),
+        objective,
+        ...(dailyBudget ? { dailyBudget: Number(dailyBudget.replace(',', '.')) } : {}),
+        specialAdCategories: specialCategory ? [specialCategory] : [],
+      });
+      setName('');
+      setDailyBudget('');
+      setSpecialCategory('');
+      setShowCreate(false);
+      setTab('campaigns');
+      setCampaignId('');
+      setAdSetId('');
+      setNotice('Campanha criada diretamente na Meta em modo pausado. Revise a configuração antes de ativar.');
+      await load(true);
+    } catch (requestError: any) {
+      setError(requestError?.response?.data?.error?.message || requestError?.response?.data?.message || 'A campanha não foi criada. Verifique a conta, a BM e as permissões da Meta.');
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function changeCampaignStatus(row: MetricRow, next: 'ACTIVE'|'PAUSED') {
     if (!canManage) return;
     try {
-      await api.post(`/campaigns/${row.id}/status`, { status: next });
+      await api.post(`/campaigns/${row.id}/status`, {
+        status: next,
+        clientId: scope.clientId,
+        ...(scope.businessId ? { businessId: scope.businessId } : {}),
+      });
       await load(true);
     } catch (requestError: any) { setError(requestError?.response?.data?.error?.message || 'Não foi possível alterar o status da campanha.'); }
   }
@@ -152,7 +238,21 @@ export default function CampaignsPro() {
   function preset(value: string) { const end = today(); setUntil(end); if (value === '7') setSince(ago(6)); if (value === '14') setSince(ago(13)); if (value === '30') setSince(ago(29)); if (value === '90') setSince(ago(89)); if (value === 'month') setSince(`${end.slice(0,8)}01`); if (value === 'year') setSince(`${end.slice(0,4)}-01-01`); }
 
   return <div className="space-y-4">
-    <section className="page-heading"><div><p className="section-kicker">Gerenciador</p><h1>Campanhas e anúncios</h1><p>Navegue da campanha até o anúncio individual mantendo BM, conta e período fixos. O status de campanha consulta a entrega atual da Meta e atualiza automaticamente a cada minuto.</p></div><button className="secondary-button" onClick={() => { void load(true); }} disabled={loading}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} />Atualizar agora</button></section>
+    <section className="page-heading"><div><p className="section-kicker">Gerenciador</p><h1>Campanhas e anúncios</h1><p>Navegue da campanha até o anúncio individual mantendo BM, conta e período fixos. O status de campanha consulta a entrega atual da Meta e atualiza automaticamente a cada minuto.</p></div><div className="flex flex-wrap gap-2">{canManage && <button type="button" className="primary-button" onClick={() => setShowCreate((value) => !value)}><Plus size={14} />{showCreate ? 'Fechar criação' : 'Nova campanha'}</button>}<button className="secondary-button" onClick={() => { void load(true); }} disabled={loading}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} />Atualizar agora</button></div></section>
+
+    {showCreate && canManage && <form onSubmit={createCampaign} className="corporate-card p-4">
+      <div className="mb-4 flex flex-col gap-1"><p className="section-kicker">Meta Ads</p><h2 className="panel-title">Criar nova campanha</h2><p className="panel-subtitle">A campanha será criada na empresa, BM e conta selecionadas acima e permanecerá pausada até sua revisão.</p></div>
+      {!scope.clientId || !scope.businessId ? <div className="message-warning">Selecione uma empresa e uma BM antes de criar a campanha.</div> : !createAccounts.length ? <div className="message-warning">Nenhuma conta Meta autorizada está vinculada a esta BM.</div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <label className="field-label">Conta de anúncio<select required className="field-control" value={createAccountId} onChange={(e) => setCreateAccountId(e.target.value)}>{createAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}{account.currency ? ` · ${account.currency}` : ''}</option>)}</select></label>
+        <label className="field-label md:col-span-1 xl:col-span-2">Nome da campanha<input required minLength={3} maxLength={200} className="field-control" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Leads WhatsApp Joinville" /></label>
+        <label className="field-label">Objetivo<select className="field-control" value={objective} onChange={(e) => setObjective(e.target.value)}>{objectives.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label className="field-label">Orçamento diário<input className="field-control" inputMode="decimal" value={dailyBudget} onChange={(e) => setDailyBudget(e.target.value)} placeholder="Opcional" /><span className="mt-1 block text-[9px] font-normal text-slate-400">Valor na moeda da conta selecionada.</span></label>
+        <label className="field-label">Categoria especial<select className="field-control" value={specialCategory} onChange={(e) => setSpecialCategory(e.target.value)}>{specialCategories.map(([value,label]) => <option key={value || 'none'} value={value}>{label}</option>)}</select></label>
+        <div className="flex items-end justify-end md:col-span-2 xl:col-span-3"><button type="submit" className="primary-button" disabled={creating || !createAccountId}>{creating ? 'Criando na Meta...' : 'Criar campanha pausada'}</button></div>
+      </div>}
+    </form>}
+
+    {notice && <div className="rounded-[7px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-medium text-emerald-700">{notice}</div>}
 
     <section className="filter-panel"><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7"><label className="field-label">Período<select className="field-control" defaultValue="30" onChange={(e) => preset(e.target.value)}><option value="7">7 dias</option><option value="14">14 dias</option><option value="30">30 dias</option><option value="90">90 dias</option><option value="month">Mês</option><option value="year">Ano</option></select></label><label className="field-label"><span><CalendarRange size={12} /> Inicial</span><input className="field-control" type="date" value={since} onChange={(e) => setSince(e.target.value)} /></label><label className="field-label"><span><CalendarRange size={12} /> Final</span><input className="field-control" type="date" value={until} onChange={(e) => setUntil(e.target.value)} /></label><label className="field-label">Campanha<select className="field-control" value={campaignId} onChange={(e) => setCampaignId(e.target.value)}><option value="">Todas</option>{campaignOptions.map((row) => <option key={row.id} value={row.metaCampaignId}>{row.name}</option>)}</select></label><label className="field-label">Conjunto<select className="field-control" value={adSetId} disabled={!campaignId} onChange={(e) => setAdSetId(e.target.value)}><option value="">Todos</option>{adSetOptions.map((row) => <option key={row.id} value={row.metaAdsetId}>{row.name}</option>)}</select></label><label className="field-label">Status<select className="field-control" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Todos</option><option value="ACTIVE">Ativa</option><option value="PAUSED">Pausada</option><option value="PENDING_REVIEW">Em análise</option><option value="IN_PROCESS">Processando</option><option value="WITH_ISSUES">Com problemas</option><option value="PAYMENT_ERROR">Erro de pagamento</option><option value="NO_BALANCE">Sem saldo</option><option value="PAYMENT_PROCESSING">Pagamento em processamento</option><option value="ACCOUNT_REVIEW">Em análise da conta</option><option value="DISAPPROVED">Reprovada</option></select></label><label className="field-label">Ordenar<select className="field-control" value={sort} onChange={(e) => setSort(e.target.value)}><option value="spend-desc">Maior investimento</option><option value="spend-asc">Menor investimento</option><option value="leads-desc">Mais leads</option><option value="cpl-asc">Menor CPL</option><option value="roas-desc">Maior ROAS</option></select></label></div><div className="mt-3 flex items-center gap-2"><Search size={13} className="text-slate-400" /><input className="field-control max-w-md" placeholder="Buscar pelo nome" value={search} onChange={(e) => setSearch(e.target.value)} /></div></section>
 
