@@ -21,8 +21,10 @@ export async function registerAiRoutes(app: FastifyInstance) {
     }).safeParse(req.query);
     if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Escopo da análise inválido.'));
 
-    const clientId = scopeClient(user, query.data.clientId, reply);
-    if (!clientId) return;
+    const clientId = scopeClient(user, query.data.clientId);
+    if (!clientId || clientId === '00000000-0000-0000-0000-000000000000') {
+      return reply.code(400).send(fail('CLIENT_REQUIRED', 'Selecione uma empresa para consultar a análise da IA.'));
+    }
     const rows = await prisma.aiCampaignHealth.findMany({
       where: {
         organizationId: user.organizationId!,
