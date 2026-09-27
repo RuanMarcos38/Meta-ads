@@ -55,6 +55,96 @@ function normalizedAccountId(value: string) {
   return String(value || '').replace(/^act_/, '').trim();
 }
 
+type CachedBusinessManagerRow = {
+  metaBusinessId: string;
+  name: string;
+  adminEmail: string | null;
+  status: string;
+  updatedAt: Date;
+};
+
+type CachedAdAccountRow = {
+  accountId: string;
+  name: string | null;
+  currency: string | null;
+  accountStatus: number | null;
+  businessId: string | null;
+  businessName: string | null;
+  updatedAt: Date;
+};
+
+export function buildCachedDirectory(
+  managers: CachedBusinessManagerRow[],
+  accounts: CachedAdAccountRow[],
+): MetaBusinessDirectoryItem[] {
+  const map = new Map<string, MetaBusinessDirectoryItem>();
+
+  const sortedManagers = [...managers].sort((a, b) => {
+    const activeA = a.status === 'active' ? 1 : 0;
+    const activeB = b.status === 'active' ? 1 : 0;
+    if (activeA !== activeB) return activeB - activeA;
+    return b.updatedAt.getTime() - a.updatedAt.getTime();
+  });
+
+  for (const manager of sortedManagers) {
+    const businessId = String(manager.metaBusinessId || '').trim();
+    if (!businessId || map.has(businessId)) continue;
+    map.set(businessId, {
+      businessId,
+      businessName: manager.name || `BM ${businessId}`,
+      users: [],
+      admins: manager.adminEmail ? [{ id: `cached-admin-${businessId}`, email: manager.adminEmail, role: 'ADMIN' }] : [],
+      pendingUsers: [],
+      adAccounts: [],
+    });
+  }
+
+  for (const account of [...accounts].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())) {
+    const businessId = String(account.businessId || '').trim();
+    if (!businessId) continue;
+    if (!map.has(businessId)) {
+      map.set(businessId, {
+        businessId,
+        businessName: account.businessName || `BM ${businessId}`,
+        users: [],
+        admins: [],
+        pendingUsers: [],
+        adAccounts: [],
+      });
+    }
+    const target = map.get(businessId)!;
+    const accountId = normalizedAccountId(account.accountId);
+    if (!accountId || target.adAccounts.some((item) => normalizedAccountId(item.accountId) === accountId)) continue;
+    target.adAccounts.push({
+      accountId,
+      name: account.name || undefined,
+      currency: account.currency || undefined,
+      accountStatus: account.accountStatus,
+    });
+  }
+
+  return Array.from(map.values())
+    .map((business) => ({
+      ...business,
+      adAccounts: [...business.adAccounts].sort((a, b) => String(a.name || a.accountId).localeCompare(String(b.name || b.accountId), 'pt-BR')),
+    }))
+    .sort((a, b) => a.businessName.localeCompare(b.businessName, 'pt-BR'));
+}
+
+async function loadCachedDirectory(organizationId: string) {
+  const [managers, accounts] = await Promise.all([
+    prisma.businessManager.findMany({
+      where: { organizationId },
+      select: { metaBusinessId: true, name: true, adminEmail: true, status: true, updatedAt: true },
+    }),
+    prisma.metaAdAccount.findMany({
+      where: { organizationId, businessId: { not: null } },
+      select: { accountId: true, name: true, currency: true, accountStatus: true, businessId: true, businessName: true, updatedAt: true },
+    }),
+  ]);
+  return buildCachedDirectory(managers, accounts);
+}
+
 export function chooseDirectoryConnection(
   clientId: string,
   candidates: DirectoryConnectionCandidate[],
@@ -113,10 +203,55 @@ function connectionError(resolution: DirectoryConnectionResolution) {
 
 async function loadDirectory(organizationId: string, clientId: string) {
   const resolution = await resolveDirectoryConnection(organizationId, clientId);
-  if (!resolution.connection) return { resolution, directory: [] as MetaBusinessDirectoryItem[] };
+  if (!resolution.connection) {
+    return {
+      resolution,
+      directory: [] as MetaBusinessDirectoryItem[],
+      directorySource: 'none' as const,
+      warning: null as string | null,
+    };
+  }
+
+  const cachedDirectory = await loadCachedDirectory(organizationId);
   const meta = new MetaAdsService(decrypt(resolution.connection.accessTokenEncrypted));
-  const directory = await meta.businessDirectory();
-  return { resolution, directory };
+
+  try {
+    const directory = await meta.businessDirectory();
+    if (directory.length) {
+      return {
+        resolution,
+        directory,
+        directorySource: 'meta' as const,
+        warning: null as string | null,
+      };
+    }
+    if (cachedDirectory.length) {
+      return {
+        resolution,
+        directory: cachedDirectory,
+        directorySource: 'cache' as const,
+        warning: 'A Meta não retornou a lista neste momento. Exibindo as BMs já descobertas e salvas na ferramenta.',
+      };
+    }
+    return {
+      resolution,
+      directory,
+      directorySource: 'meta' as const,
+      warning: null as string | null,
+    };
+  } catch (error: any) {
+    if (cachedDirectory.length) {
+      return {
+        resolution,
+        directory: cachedDirectory,
+        directorySource: 'cache' as const,
+        warning: error?.response?.data?.error?.message
+          ? `Meta temporariamente indisponível: ${error.response.data.error.message}. Exibindo as BMs salvas na ferramenta.`
+          : 'Meta temporariamente indisponível. Exibindo as BMs salvas na ferramenta para você selecionar sem perder o vínculo.',
+      };
+    }
+    throw error;
+  }
 }
 
 async function discoveryPayload(organizationId: string, clientId: string, directory: MetaBusinessDirectoryItem[]) {
@@ -159,6 +294,25 @@ async function persistSelectedDirectory(input: {
   const selectionMap = new Map(input.selections.map((item) => [item.businessId, new Set(item.accountIds.map(normalizedAccountId))]));
   const selectedDirectory = input.directory.filter((item) => selectionMap.has(item.businessId));
   const selectedIds = new Set(selectedDirectory.map((item) => item.businessId));
+
+  const activeConflicts = selectedIds.size ? await prisma.businessManager.findMany({
+    where: {
+      organizationId: input.organizationId,
+      clientId: { not: input.clientId },
+      status: 'active',
+      metaBusinessId: { in: Array.from(selectedIds) },
+    },
+    select: {
+      metaBusinessId: true,
+      name: true,
+      client: { select: { name: true } },
+    },
+  }) : [];
+
+  if (activeConflicts.length) {
+    const first = activeConflicts[0];
+    throw new Error(`A BM ${first.name} (${first.metaBusinessId}) já está vinculada à empresa ${first.client.name}. Remova o vínculo anterior antes de associá-la a outra empresa.`);
+  }
 
   if (selectedDirectory.length !== selectionMap.size) {
     throw new Error('Uma ou mais BMs selecionadas não pertencem à conexão Meta disponível para esta empresa.');
@@ -364,13 +518,15 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
   app.post('/workspace/business-managers/discover-for-new-client', { preHandler: requireAuth([...adminRoles]) }, async (req, reply) => {
     const user = req.user as AuthUser;
     try {
-      const { resolution, directory } = await loadDirectory(user.organizationId!, '__new_client__');
+      const { resolution, directory, directorySource, warning } = await loadDirectory(user.organizationId!, '__new_client__');
       if (!resolution.connection) return reply.code(409).send(fail('META_CONNECTION_REQUIRED', connectionError(resolution)));
       return ok({
         businesses: newClientDiscoveryPayload(directory),
         connectionSource: resolution.source,
         sourceClientId: resolution.sourceClientId,
-      }, 'Selecione obrigatoriamente uma ou mais BMs antes de concluir o cadastro da empresa.');
+        directorySource,
+        warning,
+      }, warning || 'Selecione obrigatoriamente uma ou mais BMs antes de concluir o cadastro da empresa.');
     } catch (error: any) {
       return reply.code(502).send(fail(
         'META_BUSINESS_DIRECTORY_FAILED',
@@ -388,7 +544,7 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
 
     let createdClient: { id: string; name: string } | null = null;
     try {
-      const { resolution, directory } = await loadDirectory(user.organizationId!, '__new_client__');
+      const { resolution, directory, directorySource, warning } = await loadDirectory(user.organizationId!, '__new_client__');
       if (!resolution.connection) return reply.code(409).send(fail('META_CONNECTION_REQUIRED', connectionError(resolution)));
 
       const selectedIds = new Set(body.data.selections.map((item) => item.businessId));
@@ -444,6 +600,8 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
             assignedAccounts: result.assignedAccounts,
             connectionSource: resolution.source,
             sourceClientId: resolution.sourceClientId,
+            directorySource,
+            warning,
           } as Prisma.InputJsonValue,
         },
       }).catch(() => undefined);
@@ -472,10 +630,17 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
     if (!client) return reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Empresa não encontrada.'));
 
     try {
-      const { resolution, directory } = await loadDirectory(user.organizationId!, client.id);
+      const { resolution, directory, directorySource, warning } = await loadDirectory(user.organizationId!, client.id);
       if (!resolution.connection) return reply.code(409).send(fail('META_CONNECTION_REQUIRED', connectionError(resolution)));
       const businesses = await discoveryPayload(user.organizationId!, client.id, directory);
-      return ok({ client, businesses, connectionSource: resolution.source, sourceClientId: resolution.sourceClientId }, 'Selecione somente as BMs e contas de anúncios que pertencem a esta empresa.');
+      return ok({
+        client,
+        businesses,
+        connectionSource: resolution.source,
+        sourceClientId: resolution.sourceClientId,
+        directorySource,
+        warning,
+      }, warning || 'Selecione somente as BMs e contas de anúncios que pertencem a esta empresa.');
     } catch (error: any) {
       return reply.code(502).send(fail('META_BUSINESS_DIRECTORY_FAILED', error?.response?.data?.error?.message || error?.message || 'Não foi possível consultar as BMs na Meta.'));
     }
@@ -489,7 +654,7 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
     if (!client) return reply.code(404).send(fail('CLIENT_NOT_FOUND', 'Empresa não encontrada.'));
 
     try {
-      const { resolution, directory } = await loadDirectory(user.organizationId!, client.id);
+      const { resolution, directory, directorySource, warning } = await loadDirectory(user.organizationId!, client.id);
       if (!resolution.connection) return reply.code(409).send(fail('META_CONNECTION_REQUIRED', connectionError(resolution)));
       const result = await persistSelectedDirectory({
         organizationId: user.organizationId!,
@@ -505,12 +670,13 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
           action: 'ASSIGN_COMPANY_BUSINESS_MANAGERS',
           entity: 'Client',
           entityId: client.id,
-          metadataJson: { selections: body.data.selections, ...result } as Prisma.InputJsonValue,
+          metadataJson: { selections: body.data.selections, ...result, directorySource, warning } as Prisma.InputJsonValue,
         },
       });
-      return ok(result, result.selectedBusinesses > 1
-        ? 'BMs agrupadas na mesma empresa. Dashboard e relatórios permanecem separados pelo seletor de BM e conta.'
-        : 'BM vinculada à empresa com as contas autorizadas selecionadas.');
+      return ok({ ...result, directorySource, warning }, warning
+        || (result.selectedBusinesses > 1
+          ? 'BMs agrupadas na mesma empresa. Dashboard e relatórios permanecem separados pelo seletor de BM e conta.'
+          : 'BM vinculada à empresa com as contas autorizadas selecionadas.'));
     } catch (error: any) {
       return reply.code(409).send(fail('BUSINESS_ASSIGNMENT_FAILED', error?.message || 'Não foi possível vincular as BMs desta empresa.'));
     }
