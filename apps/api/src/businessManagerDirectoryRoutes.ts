@@ -60,11 +60,19 @@ export function chooseDirectoryConnection(
   candidates: DirectoryConnectionCandidate[],
 ): DirectoryConnectionResolution {
   const sorted = [...candidates].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+
+  const organizationConnection = sorted.find((item) => item.clientId === null);
+  if (organizationConnection) {
+    return { connection: organizationConnection, source: 'organization', sourceClientId: null };
+  }
+
   const own = sorted.find((item) => item.clientId === clientId);
   if (own) return { connection: own, source: 'client', sourceClientId: own.clientId };
 
   if (!sorted.length) return { connection: null, source: 'none', sourceClientId: null };
 
+  // Compatibilidade com conexões legadas por empresa. Elas só podem ser
+  // compartilhadas quando todas pertencem ao mesmo usuário Meta.
   const metaUsers = new Set(sorted.map((item) => String(item.metaUserId || '').trim()).filter(Boolean));
   const canShareSafely = metaUsers.size === 1 || (metaUsers.size === 0 && sorted.length === 1);
   if (!canShareSafely) return { connection: null, source: 'ambiguous', sourceClientId: null };
@@ -99,8 +107,8 @@ async function getClient(organizationId: string, clientId: string) {
 
 function connectionError(resolution: DirectoryConnectionResolution) {
   return resolution.source === 'ambiguous'
-    ? 'Existem diferentes usuários Meta conectados nesta organização. Conecte a Meta diretamente a esta empresa para listar somente as BMs corretas.'
-    : 'Nenhuma conexão Meta ativa foi encontrada. Conecte a Meta em Integrações e tente novamente.';
+    ? 'Existem conexões Meta legadas diferentes. Conecte a ferramenta à Meta em Integrações para usar uma única conexão global e separar as BMs por empresa.'
+    : 'A ferramenta ainda não possui uma conexão Meta global ativa. Conecte a Meta em Integrações e tente novamente.';
 }
 
 async function loadDirectory(organizationId: string, clientId: string) {
