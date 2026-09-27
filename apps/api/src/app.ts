@@ -27,6 +27,7 @@ import { registerClientManagementRoutes } from './clientManagementRoutes.js';
 import { registerGoogleAnalyticsRoutes } from './googleAnalyticsRoutes.js';
 import { registerGoogleAnalyticsDecisionRoutes } from './googleAnalyticsDecisionRoutes.js';
 import { registerMetaFinancialRoutes } from './metaFinancialRoutes.js';
+import { registerAiRoutes } from './aiRoutes.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -65,6 +66,7 @@ export async function buildApp() {
   await registerGoogleAnalyticsRoutes(app);
   await registerGoogleAnalyticsDecisionRoutes(app);
   await registerMetaFinancialRoutes(app);
+  await registerAiRoutes(app);
   await registerBusinessManagerDirectoryRoutes(app);
   await registerMetaLiveStatusRoutes(app);
   await registerDestructiveAdminRoutes(app);
