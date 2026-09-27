@@ -132,6 +132,33 @@ export function buildCachedDirectory(
 }
 
 async function loadCachedDirectory(organizationId: string) {
+  const catalog = await prisma.metaBusinessCatalog.findMany({
+    where: { organizationId },
+    orderBy: { businessName: 'asc' },
+  });
+
+  if (catalog.length) {
+    return catalog.map((item) => {
+      const rawAccounts = Array.isArray(item.accountsJson) ? item.accountsJson : [];
+      const adAccounts = rawAccounts
+        .map((account: any) => ({
+          accountId: normalizedAccountId(String(account?.accountId || '')),
+          name: account?.name ? String(account.name) : undefined,
+          currency: account?.currency ? String(account.currency) : undefined,
+          accountStatus: account?.accountStatus == null ? null : Number(account.accountStatus),
+        }))
+        .filter((account) => account.accountId);
+      return {
+        businessId: item.businessId,
+        businessName: item.businessName,
+        users: [],
+        admins: item.adminEmail ? [{ id: `catalog-admin-${item.businessId}`, email: item.adminEmail, role: 'ADMIN' }] : [],
+        pendingUsers: [],
+        adAccounts,
+      } satisfies MetaBusinessDirectoryItem;
+    });
+  }
+
   const [managers, accounts] = await Promise.all([
     prisma.businessManager.findMany({
       where: { organizationId },
@@ -143,6 +170,52 @@ async function loadCachedDirectory(organizationId: string) {
     }),
   ]);
   return buildCachedDirectory(managers, accounts);
+}
+
+async function persistCatalogDirectory(
+  organizationId: string,
+  connectionId: string,
+  directory: MetaBusinessDirectoryItem[],
+) {
+  const seen = new Set(directory.map((business) => business.businessId));
+
+  await prisma.$transaction(async (tx) => {
+    for (const business of directory) {
+      await tx.metaBusinessCatalog.upsert({
+        where: {
+          organizationId_businessId: {
+            organizationId,
+            businessId: business.businessId,
+          },
+        },
+        update: {
+          connectionId,
+          businessName: business.businessName,
+          adminEmail: preferredEmail(business),
+          accountsJson: business.adAccounts as unknown as Prisma.InputJsonValue,
+          lastSeenAt: new Date(),
+        },
+        create: {
+          organizationId,
+          connectionId,
+          businessId: business.businessId,
+          businessName: business.businessName,
+          adminEmail: preferredEmail(business),
+          accountsJson: business.adAccounts as unknown as Prisma.InputJsonValue,
+          lastSeenAt: new Date(),
+        },
+      });
+    }
+
+    if (seen.size) {
+      await tx.metaBusinessCatalog.deleteMany({
+        where: {
+          organizationId,
+          businessId: { notIn: Array.from(seen) },
+        },
+      });
+    }
+  });
 }
 
 export function chooseDirectoryConnection(
@@ -218,6 +291,7 @@ async function loadDirectory(organizationId: string, clientId: string) {
   try {
     const directory = await meta.businessDirectory();
     if (directory.length) {
+      await persistCatalogDirectory(organizationId, resolution.connection.id, directory);
       return {
         resolution,
         directory,
@@ -230,7 +304,7 @@ async function loadDirectory(organizationId: string, clientId: string) {
         resolution,
         directory: cachedDirectory,
         directorySource: 'cache' as const,
-        warning: 'A Meta não retornou a lista neste momento. Exibindo as BMs já descobertas e salvas na ferramenta.',
+        warning: null as string | null,
       };
     }
     return {
@@ -245,9 +319,7 @@ async function loadDirectory(organizationId: string, clientId: string) {
         resolution,
         directory: cachedDirectory,
         directorySource: 'cache' as const,
-        warning: error?.response?.data?.error?.message
-          ? `Meta temporariamente indisponível: ${error.response.data.error.message}. Exibindo as BMs salvas na ferramenta.`
-          : 'Meta temporariamente indisponível. Exibindo as BMs salvas na ferramenta para você selecionar sem perder o vínculo.',
+        warning: null as string | null,
       };
     }
     throw error;
@@ -572,6 +644,75 @@ export async function registerBusinessManagerDirectoryRoutes(app: FastifyInstanc
         'META_BUSINESS_DIRECTORY_FAILED',
         error?.response?.data?.error?.message || error?.message || 'Não foi possível consultar as BMs na Meta.',
       ));
+    }
+  });
+
+  app.post('/workspace/business-managers/accounts-for-selection', { preHandler: requireAuth([...adminRoles]) }, async (req, reply) => {
+    const user = req.user as AuthUser;
+    const body = z.object({
+      businessId: z.string().trim().min(1).max(100),
+      clientId: z.string().uuid().optional(),
+    }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Business Manager inválida.'));
+
+    const resolution = await resolveDirectoryConnection(user.organizationId!, body.data.clientId || '__new_client__');
+    if (!resolution.connection) return reply.code(409).send(fail('META_CONNECTION_REQUIRED', connectionError(resolution)));
+
+    const cached = await prisma.metaBusinessCatalog.findUnique({
+      where: {
+        organizationId_businessId: {
+          organizationId: user.organizationId!,
+          businessId: body.data.businessId,
+        },
+      },
+    });
+    const cachedAccounts = Array.isArray(cached?.accountsJson) ? cached!.accountsJson as any[] : [];
+
+    try {
+      const meta = new MetaAdsService(decrypt(resolution.connection.accessTokenEncrypted));
+      const accounts = await meta.businessAccounts(body.data.businessId);
+      if (accounts.length) {
+        await prisma.metaBusinessCatalog.upsert({
+          where: {
+            organizationId_businessId: {
+              organizationId: user.organizationId!,
+              businessId: body.data.businessId,
+            },
+          },
+          update: {
+            connectionId: resolution.connection.id,
+            accountsJson: accounts as unknown as Prisma.InputJsonValue,
+            lastSeenAt: new Date(),
+          },
+          create: {
+            organizationId: user.organizationId!,
+            connectionId: resolution.connection.id,
+            businessId: body.data.businessId,
+            businessName: cached?.businessName || `BM ${body.data.businessId}`,
+            accountsJson: accounts as unknown as Prisma.InputJsonValue,
+            lastSeenAt: new Date(),
+          },
+        });
+      }
+      return ok({
+        accounts: accounts.map((account) => ({
+          accountId: normalizedAccountId(account.accountId),
+          name: account.name || `Conta ${normalizedAccountId(account.accountId)}`,
+          currency: account.currency || null,
+          accountStatus: account.accountStatus ?? null,
+        })),
+        source: 'meta',
+      });
+    } catch {
+      return ok({
+        accounts: cachedAccounts.map((account: any) => ({
+          accountId: normalizedAccountId(String(account?.accountId || '')),
+          name: account?.name || `Conta ${normalizedAccountId(String(account?.accountId || ''))}`,
+          currency: account?.currency || null,
+          accountStatus: account?.accountStatus ?? null,
+        })).filter((account: any) => account.accountId),
+        source: 'cache',
+      });
     }
   });
 
