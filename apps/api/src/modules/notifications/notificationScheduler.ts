@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { Prisma } from '@prisma/client';
 import type { FastifyBaseLogger } from 'fastify';
 import { env } from '../../config/env.js';
 import { decrypt } from '../../shared/crypto.js';
@@ -102,6 +103,99 @@ async function sendWhatsApp(phone: string, text: string) {
     headers: { apikey: env.whatsapp.apiKey, 'content-type': 'application/json' },
     timeout: 20_000,
   });
+}
+
+type DailyWhatsAppReservation = {
+  allowed: boolean;
+  reservationId?: string;
+  phone: string;
+  localDate: string;
+};
+
+export function whatsappDailyLimitKey(phone: string, now = new Date()) {
+  return {
+    phone: normalizePhone(phone),
+    localDate: localClock(now).date,
+  };
+}
+
+async function reserveDailyWhatsAppDelivery(input: {
+  organizationId: string;
+  clientId: string;
+  phone: string;
+  reason: string;
+  now?: Date;
+}): Promise<DailyWhatsAppReservation> {
+  const key = whatsappDailyLimitKey(input.phone, input.now);
+  if (!key.phone) {
+    return { allowed: false, phone: '', localDate: key.localDate };
+  }
+
+  try {
+    const reservation = await prisma.whatsAppDailyDeliveryGuard.create({
+      data: {
+        organizationId: input.organizationId,
+        clientId: input.clientId,
+        phone: key.phone,
+        localDate: key.localDate,
+        reason: input.reason,
+        status: 'RESERVED',
+      },
+      select: { id: true },
+    });
+    return {
+      allowed: true,
+      reservationId: reservation.id,
+      phone: key.phone,
+      localDate: key.localDate,
+    };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return { allowed: false, phone: key.phone, localDate: key.localDate };
+    }
+    throw error;
+  }
+}
+
+async function updateDailyWhatsAppReservation(id: string, status: 'SENT' | 'FAILED') {
+  await prisma.whatsAppDailyDeliveryGuard.update({
+    where: { id },
+    data: { status },
+  }).catch(() => undefined);
+}
+
+async function sendWhatsAppOncePerDay(input: {
+  organizationId: string;
+  clientId: string;
+  phone: string;
+  text: string;
+  reason: string;
+}) {
+  const reservation = await reserveDailyWhatsAppDelivery(input);
+  if (!reservation.allowed || !reservation.reservationId) {
+    return {
+      sent: false,
+      blockedByDailyLimit: true,
+      localDate: reservation.localDate,
+      phone: reservation.phone,
+    };
+  }
+
+  try {
+    await sendWhatsApp(reservation.phone, input.text);
+    await updateDailyWhatsAppReservation(reservation.reservationId, 'SENT');
+    return {
+      sent: true,
+      blockedByDailyLimit: false,
+      localDate: reservation.localDate,
+      phone: reservation.phone,
+    };
+  } catch (error) {
+    // Mantemos a reserva mesmo em erro/timeout para não correr o risco de
+    // reenviar uma mensagem que o provedor pode já ter aceitado.
+    await updateDailyWhatsAppReservation(reservation.reservationId, 'FAILED');
+    throw error;
+  }
 }
 
 async function createConfigAlert(input: {
@@ -229,15 +323,27 @@ async function lowBalanceCheck(logger: FastifyBaseLogger) {
         'O saldo está abaixo de R$ 10,00. Recarregue a conta para evitar interrupção das campanhas.',
       ].join('\n');
       try {
-        await sendWhatsApp(account.client.phone!, whatsappText);
+        const delivery = await sendWhatsAppOncePerDay({
+          organizationId: account.organizationId,
+          clientId: account.clientId,
+          phone: account.client.phone!,
+          text: whatsappText,
+          reason: 'LOW_META_BALANCE',
+        });
         await prisma.auditLog.create({
           data: {
             organizationId: account.organizationId,
             businessId: account.businessId,
-            action: 'WHATSAPP_LOW_BALANCE_SENT',
+            action: delivery.sent ? 'WHATSAPP_LOW_BALANCE_SENT' : 'WHATSAPP_DAILY_LIMIT_BLOCKED',
             entity: 'MetaAdAccount',
             entityId: account.id,
-            metadataJson: { clientId: account.clientId, balance, currency: 'BRL' },
+            metadataJson: {
+              clientId: account.clientId,
+              balance,
+              currency: 'BRL',
+              localDate: delivery.localDate,
+              dailyLimit: 1,
+            },
           },
         });
       } catch (error: any) {
@@ -249,7 +355,11 @@ async function lowBalanceCheck(logger: FastifyBaseLogger) {
             action: 'WHATSAPP_LOW_BALANCE_FAILED',
             entity: 'MetaAdAccount',
             entityId: account.id,
-            metadataJson: { clientId: account.clientId, error: String(error?.message || 'Falha no envio') },
+            metadataJson: {
+              clientId: account.clientId,
+              error: String(error?.message || 'Falha no envio'),
+              dailyLimit: 1,
+            },
           },
         });
       }
@@ -277,35 +387,47 @@ async function dailySummaryCheck(logger: FastifyBaseLogger, now = new Date()) {
     orderBy: [{ clientId: 'asc' }, { name: 'asc' }],
   });
 
+  const managersByClient = new Map<string, typeof managers>();
   for (const manager of managers) {
     if (!manager.adAccounts.length) continue;
-    const sent = await prisma.auditLog.findFirst({
-      where: {
-        organizationId: manager.organizationId,
-        businessId: manager.metaBusinessId,
-        action: 'WHATSAPP_DAILY_SUMMARY_SENT',
-        createdAt: { gte: new Date(Date.now() - 36 * 60 * 60 * 1000) },
-        metadataJson: { path: ['date'], equals: clock.date },
-      },
-      select: { id: true },
-    });
-    if (sent) continue;
+    const current = managersByClient.get(manager.clientId) || [];
+    current.push(manager);
+    managersByClient.set(manager.clientId, current);
+  }
 
-    if (!(await canSendForClient({ organizationId: manager.organizationId, clientId: manager.clientId, businessId: manager.metaBusinessId, phone: manager.client.phone }))) continue;
+  for (const clientManagers of managersByClient.values()) {
+    const first = clientManagers[0];
+    if (!first) continue;
+    const client = first.client;
 
+    if (!(await canSendForClient({
+      organizationId: first.organizationId,
+      clientId: first.clientId,
+      phone: client.phone,
+    }))) continue;
+
+    const adAccountIds = Array.from(new Set(
+      clientManagers.flatMap((manager) => manager.adAccounts.map((item) => item.id)),
+    ));
     const aggregate = await prisma.insightDaily.aggregate({
       where: {
-        organizationId: manager.organizationId,
-        clientId: manager.clientId,
-        adAccountId: { in: manager.adAccounts.map((item) => item.id) },
+        organizationId: first.organizationId,
+        clientId: first.clientId,
+        adAccountId: { in: adAccountIds },
         level: 'campaign',
         date: { gte: periodStart, lte: periodEnd },
       },
       _sum: { spend: true, conversations: true, impressions: true, reach: true },
     });
+
+    const businessNames = clientManagers.map((manager) => manager.name);
+    const businessLabel = businessNames.length === 1
+      ? businessNames[0]
+      : `${businessNames.length} BMs: ${businessNames.join(', ')}`;
+
     const text = buildDailySummaryMessage({
-      companyName: manager.client.name,
-      businessName: manager.name,
+      companyName: client.name,
+      businessName: businessLabel,
       spend: Number(aggregate._sum.spend || 0),
       conversations: Number(aggregate._sum.conversations || 0),
       impressions: Number(aggregate._sum.impressions || 0),
@@ -313,27 +435,44 @@ async function dailySummaryCheck(logger: FastifyBaseLogger, now = new Date()) {
     });
 
     try {
-      await sendWhatsApp(manager.client.phone!, text);
+      const delivery = await sendWhatsAppOncePerDay({
+        organizationId: first.organizationId,
+        clientId: first.clientId,
+        phone: client.phone!,
+        text,
+        reason: 'DAILY_SUMMARY',
+      });
+
       await prisma.auditLog.create({
         data: {
-          organizationId: manager.organizationId,
-          businessId: manager.metaBusinessId,
-          action: 'WHATSAPP_DAILY_SUMMARY_SENT',
-          entity: 'BusinessManager',
-          entityId: manager.id,
-          metadataJson: { clientId: manager.clientId, date: clock.date },
+          organizationId: first.organizationId,
+          businessId: null,
+          action: delivery.sent ? 'WHATSAPP_DAILY_SUMMARY_SENT' : 'WHATSAPP_DAILY_LIMIT_BLOCKED',
+          entity: 'Client',
+          entityId: first.clientId,
+          metadataJson: {
+            clientId: first.clientId,
+            date: clock.date,
+            businessCount: clientManagers.length,
+            dailyLimit: 1,
+          },
         },
       });
     } catch (error: any) {
-      logger.error({ err: error, clientId: manager.clientId, businessId: manager.metaBusinessId }, 'Falha ao enviar resumo diário por WhatsApp.');
+      logger.error({ err: error, clientId: first.clientId }, 'Falha ao enviar resumo diário por WhatsApp.');
       await prisma.auditLog.create({
         data: {
-          organizationId: manager.organizationId,
-          businessId: manager.metaBusinessId,
+          organizationId: first.organizationId,
+          businessId: null,
           action: 'WHATSAPP_DAILY_SUMMARY_FAILED',
-          entity: 'BusinessManager',
-          entityId: manager.id,
-          metadataJson: { clientId: manager.clientId, date: clock.date, error: String(error?.message || 'Falha no envio') },
+          entity: 'Client',
+          entityId: first.clientId,
+          metadataJson: {
+            clientId: first.clientId,
+            date: clock.date,
+            error: String(error?.message || 'Falha no envio'),
+            dailyLimit: 1,
+          },
         },
       });
     }
@@ -370,7 +509,7 @@ export function startNotificationScheduler(logger: FastifyBaseLogger) {
 
   const initialTimer = setTimeout(() => { void tick(); }, 45_000);
   const intervalTimer = setInterval(() => { void tick(); }, 60_000);
-  logger.info('Alertas de saldo Meta configurados a cada 5 minutos e resumo WhatsApp por BM ao fim do dia (23:55, horário de Brasília).');
+  logger.info('Alertas WhatsApp protegidos por limite rígido de 1 mensagem por telefone/dia; resumo diário consolidado por cliente às 23:55 (horário de Brasília).');
 
   return () => {
     stopped = true;
