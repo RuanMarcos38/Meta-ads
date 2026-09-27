@@ -35,6 +35,9 @@ type BusinessChoice = {
   businessId: string;
   businessName: string;
   selected: boolean;
+  available?: boolean;
+  assignedClientId?: string | null;
+  assignedClientName?: string | null;
   accounts: Array<{ accountId: string; name: string; currency?: string | null; selected: boolean }>;
 };
 
@@ -75,6 +78,7 @@ export default function CompaniesPro() {
   const [newBusinessLoading, setNewBusinessLoading] = useState(false);
   const [newMetaConnectionRequired, setNewMetaConnectionRequired] = useState(false);
   const [newMetaConnecting, setNewMetaConnecting] = useState(false);
+  const [newDirectoryWarning, setNewDirectoryWarning] = useState('');
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState('');
@@ -86,6 +90,7 @@ export default function CompaniesPro() {
   const [editBusinessLoaded, setEditBusinessLoaded] = useState(false);
   const [editMetaConnectionRequired, setEditMetaConnectionRequired] = useState(false);
   const [editMetaConnecting, setEditMetaConnecting] = useState(false);
+  const [editDirectoryWarning, setEditDirectoryWarning] = useState('');
   const [error, setError] = useState('');
 
   async function load() {
@@ -126,10 +131,14 @@ export default function CompaniesPro() {
     try {
       const response = await api.post('/workspace/business-managers/discover-for-new-client', {});
       const rows = Array.isArray(response.data?.data?.businesses) ? response.data.data.businesses : [];
+      setNewDirectoryWarning(String(response.data?.data?.warning || ''));
       setNewBusinesses(rows.map((item: any) => ({
         businessId: String(item.businessId),
         businessName: String(item.businessName || item.businessId),
         selected: false,
+        available: item.available !== false,
+        assignedClientId: item.assignedClientId || null,
+        assignedClientName: item.assignedClientName || null,
         accounts: Array.isArray(item.accounts) ? item.accounts.map((account: any) => ({
           accountId: String(account.accountId),
           name: String(account.name || account.accountId),
@@ -142,6 +151,7 @@ export default function CompaniesPro() {
     } catch (err: any) {
       setNewBusinesses([]);
       setNewBusinessLoaded(false);
+      setNewDirectoryWarning('');
       const code = err?.response?.data?.error?.code;
       if (code === 'META_CONNECTION_REQUIRED') {
         setNewMetaConnectionRequired(true);
@@ -157,6 +167,7 @@ export default function CompaniesPro() {
   function toggleNewBusiness(businessId: string) {
     setNewBusinesses((current) => current.map((business) => {
       if (business.businessId !== businessId) return business;
+      if (business.available === false) return business;
       const selected = !business.selected;
       return {
         ...business,
@@ -253,10 +264,14 @@ export default function CompaniesPro() {
     try {
       const response = await api.post('/workspace/business-managers/discover-from-meta', { clientId });
       const rows = Array.isArray(response.data?.data?.businesses) ? response.data.data.businesses : [];
+      setEditDirectoryWarning(String(response.data?.data?.warning || ''));
       setEditBusinesses(rows.map((item: any) => ({
         businessId: String(item.businessId),
         businessName: String(item.businessName || item.businessId),
         selected: Boolean(item.selected),
+        available: item.available !== false,
+        assignedClientId: item.assignedClientId || null,
+        assignedClientName: item.assignedClientName || null,
         accounts: Array.isArray(item.accounts) ? item.accounts.map((account: any) => ({
           accountId: String(account.accountId),
           name: String(account.name || account.accountId),
@@ -268,6 +283,7 @@ export default function CompaniesPro() {
     } catch (err: any) {
       setEditBusinesses([]);
       setEditBusinessLoaded(false);
+      setEditDirectoryWarning('');
       const code = err?.response?.data?.error?.code;
       if (code === 'META_CONNECTION_REQUIRED') {
         setEditMetaConnectionRequired(true);
@@ -282,6 +298,7 @@ export default function CompaniesPro() {
   function toggleEditBusiness(businessId: string) {
     setEditBusinesses((current) => current.map((business) => {
       if (business.businessId !== businessId) return business;
+      if (business.available === false) return business;
       const selected = !business.selected;
       return {
         ...business,
@@ -338,6 +355,7 @@ export default function CompaniesPro() {
     setEditBusinesses([]);
     setEditBusinessLoaded(false);
     setEditMetaConnectionRequired(false);
+    setEditDirectoryWarning('');
     setEditForm({
       name: client.name || '',
       companyName: client.companyName || '',
@@ -475,13 +493,15 @@ export default function CompaniesPro() {
             <RefreshCw size={13} className={newBusinessLoading ? 'animate-spin' : ''} />Atualizar BMs
           </button>
         </div>
+        {newDirectoryWarning && <div className="message-warning mb-3">{newDirectoryWarning}</div>}
         <div className="grid gap-3 xl:grid-cols-2">
           {newBusinesses.map((business) => <article key={business.businessId} className={`rounded-[8px] border p-3 ${business.selected ? 'border-blue-200 bg-blue-50/40' : 'border-[#dfe5e2] bg-white'}`}>
             <label className="flex cursor-pointer items-start gap-2">
-              <input className="mt-1" type="checkbox" checked={business.selected} onChange={() => toggleNewBusiness(business.businessId)} />
+              <input className="mt-1" type="checkbox" checked={business.selected} disabled={business.available === false} onChange={() => toggleNewBusiness(business.businessId)} />
               <span className="min-w-0">
                 <strong className="block text-[12px] font-semibold text-slate-700">{business.businessName}</strong>
                 <small className="block text-[10px] text-slate-500">ID {business.businessId} · {business.accounts.length} conta{business.accounts.length === 1 ? '' : 's'}</small>
+                {business.available === false && <small className="mt-1 block text-[10px] font-semibold text-amber-700">Já vinculada à empresa {business.assignedClientName || 'outra empresa'}</small>}
               </span>
             </label>
             {business.selected && <div className="mt-3 space-y-1.5 border-t border-[#e2e7e4] pt-2">
@@ -543,13 +563,16 @@ export default function CompaniesPro() {
             </button>
           </div>}
 
-          {!editBusinessLoading && editBusinessLoaded && <div className="grid gap-3 xl:grid-cols-2">
+          {!editBusinessLoading && editBusinessLoaded && <>
+            {editDirectoryWarning && <div className="message-warning mb-3">{editDirectoryWarning}</div>}
+            <div className="grid gap-3 xl:grid-cols-2">
             {editBusinesses.map((business) => <article key={business.businessId} className={`rounded-[8px] border p-3 ${business.selected ? 'border-blue-200 bg-blue-50/40' : 'border-[#dfe5e2] bg-white'}`}>
               <label className="flex cursor-pointer items-start gap-2">
-                <input className="mt-1" type="checkbox" checked={business.selected} onChange={() => toggleEditBusiness(business.businessId)} />
+                <input className="mt-1" type="checkbox" checked={business.selected} disabled={business.available === false} onChange={() => toggleEditBusiness(business.businessId)} />
                 <span className="min-w-0">
                   <strong className="block text-[12px] font-semibold text-slate-700">{business.businessName}</strong>
                   <small className="block text-[10px] text-slate-500">ID {business.businessId} · {business.accounts.length} conta{business.accounts.length === 1 ? '' : 's'}</small>
+                  {business.available === false && <small className="mt-1 block text-[10px] font-semibold text-amber-700">Já vinculada à empresa {business.assignedClientName || 'outra empresa'}</small>}
                 </span>
               </label>
               {business.selected && <div className="mt-3 space-y-1.5 border-t border-[#e2e7e4] pt-2">
@@ -573,7 +596,8 @@ export default function CompaniesPro() {
                 </button>
               </div>
             </div>}
-          </div>}
+            </div>
+          </>}
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">
