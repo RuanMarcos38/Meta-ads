@@ -142,23 +142,30 @@ async function getFinancialAccountGraph(path: string, token: string) {
   const base = await getGraph(path, token, { fields: BASE_FINANCIAL_FIELDS });
   if (!base?.is_prepay_account) return base;
 
+  const currencyAmountFields = 'amount,amount_in_hundredths,currency,offsetted_amount';
   const optionalFieldSets = [
-    'stored_balance_status,prepay_account_balance,total_prepay_balance',
-    'prepay_account_balance,total_prepay_balance',
+    `stored_balance_status,total_prepay_balance.fields(${currencyAmountFields}),prepay_account_balance.fields(${currencyAmountFields})`,
+    `total_prepay_balance.fields(${currencyAmountFields})`,
+    `prepay_account_balance.fields(${currencyAmountFields})`,
+    'stored_balance_status,total_prepay_balance,prepay_account_balance',
     'total_prepay_balance',
     'prepay_account_balance',
   ];
 
+  let merged = base;
   for (const fields of optionalFieldSets) {
     try {
       const extra = await getGraph(path, token, { fields });
-      return { ...base, ...extra };
+      merged = { ...merged, ...extra };
+      if (extra?.total_prepay_balance != null || extra?.prepay_account_balance != null) {
+        return merged;
+      }
     } catch (error: any) {
       if (isGraphRateLimit(error)) break;
     }
   }
 
-  return base;
+  return merged;
 }
 
 async function getPagedGraph(path: string, token: string, params: Record<string, unknown>) {
