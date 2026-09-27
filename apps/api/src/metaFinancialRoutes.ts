@@ -258,60 +258,118 @@ async function getFinancialAccountWithFallback(
   primaryConnection: FinancialConnectionCandidate,
   organizationId: string,
   clientId: string,
-) {
-  const alternatives = await prisma.metaConnection.findMany({
-    where: {
-      organizationId,
-      status: 'active',
-      OR: [
-        { clientId },
-        { clientId: null },
-      ],
-    },
-    orderBy: { updatedAt: 'desc' },
-    take: 6,
-    select: {
-      id: true,
-      status: true,
-      accessTokenEncrypted: true,
-    },
-  });
+  accountDbId: string,
+): Promise<FinancialFetchResult> {
+  const cacheKey = `${organizationId}:${path}`;
+  const now = Date.now();
+  const cached = financialCache.get(cacheKey);
 
-  const candidates = [primaryConnection, ...alternatives]
-    .filter((connection, index, all) =>
-      connection.status === 'active'
-      && all.findIndex((item) => item.id === connection.id) === index);
-
-  let firstSuccessful: { data: any; token: string; connectionId: string } | null = null;
-  let lastError: any = null;
-
-  for (const connection of candidates) {
-    try {
-      const token = decrypt(connection.accessTokenEncrypted);
-      const data = await getFinancialAccountGraph(path, token);
-      const currency = String(data?.currency || currencyHint || 'BRL').toUpperCase();
-      const displayedBalance = resolveDisplayedBalance(data, currency);
-      const isPrepay = Boolean(data?.is_prepay_account)
-        || String(data?.stored_balance_status || '').toLowerCase() === 'prepay';
-
-      if (!firstSuccessful) {
-        firstSuccessful = { data, token, connectionId: connection.id };
-      }
-
-      // Para pós-pago, a primeira resposta válida já é suficiente. Para pré-pago,
-      // continuamos tentando somente conexões já autorizadas da mesma organização
-      // até encontrar um CurrencyAmount real retornado pela Meta.
-      if (!isPrepay || displayedBalance.value != null) {
-        return { data, token, connectionId: connection.id };
-      }
-    } catch (error: any) {
-      lastError = error;
-      if (isGraphRateLimit(error)) break;
-    }
+  if (cached && now - new Date(cached.fetchedAt).getTime() < FINANCIAL_CACHE_TTL_MS) {
+    return { ...cached, fromCache: true };
   }
 
-  if (firstSuccessful) return firstSuccessful;
-  throw lastError || new Error('Nenhuma conexão Meta ativa conseguiu consultar a conta de anúncios.');
+  const inflight = financialInflight.get(cacheKey);
+  if (inflight) return inflight;
+
+  const blockedUntil = financialRateLimitedUntil.get(cacheKey) || 0;
+  if (blockedUntil > now && cached) {
+    return { ...cached, fromCache: true, rateLimited: true };
+  }
+
+  const task = (async (): Promise<FinancialFetchResult> => {
+    const alternatives = await prisma.metaConnection.findMany({
+      where: {
+        organizationId,
+        status: 'active',
+        OR: [{ clientId }, { clientId: null }],
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 2,
+      select: {
+        id: true,
+        status: true,
+        accessTokenEncrypted: true,
+      },
+    });
+
+    const candidates = [primaryConnection, ...alternatives]
+      .filter((connection, index, all) =>
+        connection.status === 'active'
+        && all.findIndex((item) => item.id === connection.id) === index)
+      .slice(0, 2);
+
+    let firstSuccessful: FinancialFetchResult | null = null;
+    let lastError: any = null;
+
+    for (const connection of candidates) {
+      try {
+        const token = decrypt(connection.accessTokenEncrypted);
+        const graph = await getFinancialAccountGraph(path, token);
+        const data = graph.data;
+        const currency = String(data?.currency || currencyHint || 'BRL').toUpperCase();
+        const displayedBalance = resolveDisplayedBalance(data, currency);
+
+        const liveSnapshot: ConfirmedBalanceSnapshot | null = displayedBalance.value == null
+          ? null
+          : {
+              value: displayedBalance.value,
+              currency,
+              label: displayedBalance.label,
+              source: displayedBalance.source,
+              confirmedAt: new Date().toISOString(),
+            };
+
+        if (graph.rateLimited) {
+          financialRateLimitedUntil.set(cacheKey, Date.now() + FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+        }
+
+        const persistedSnapshot = liveSnapshot
+          || await readConfirmedBalanceSnapshot(organizationId, accountDbId);
+
+        if (liveSnapshot) {
+          await persistConfirmedBalanceSnapshot(organizationId, accountDbId, liveSnapshot);
+        }
+
+        const result: FinancialFetchResult = {
+          data,
+          token,
+          connectionId: connection.id,
+          fetchedAt: new Date().toISOString(),
+          fromCache: false,
+          rateLimited: graph.rateLimited,
+          balanceSnapshot: persistedSnapshot,
+        };
+
+        financialCache.set(cacheKey, result);
+        if (!firstSuccessful) firstSuccessful = result;
+
+        const isPrepay = Boolean(data?.is_prepay_account);
+        if (!isPrepay || liveSnapshot) return result;
+
+        // Resposta base real já recebida. Não insistimos com várias chamadas/tokens
+        // no mesmo ciclo porque isso pode bloquear a leitura financeira da conta.
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        if (isGraphRateLimit(error)) {
+          financialRateLimitedUntil.set(cacheKey, Date.now() + FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+          if (cached) return { ...cached, fromCache: true, rateLimited: true };
+          break;
+        }
+      }
+    }
+
+    if (firstSuccessful) return firstSuccessful;
+    if (cached) return { ...cached, fromCache: true, rateLimited: isGraphRateLimit(lastError) };
+    throw lastError || new Error('Nenhuma conexão Meta ativa conseguiu consultar a conta de anúncios.');
+  })();
+
+  financialInflight.set(cacheKey, task);
+  try {
+    return await task;
+  } finally {
+    financialInflight.delete(cacheKey);
+  }
 }
 
 async function getPagedGraph(path: string, token: string, params: Record<string, unknown>) {
