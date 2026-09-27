@@ -80,6 +80,8 @@ export default function CampaignsPro() {
   const [notice, setNotice] = useState('');
   const [name, setName] = useState('');
   const [objective, setObjective] = useState('OUTCOME_LEADS');
+  const [createClientId, setCreateClientId] = useState('');
+  const [createBusinessId, setCreateBusinessId] = useState('');
   const [createAccountId, setCreateAccountId] = useState('');
   const [dailyBudget, setDailyBudget] = useState('');
   const [specialCategory, setSpecialCategory] = useState('');
@@ -91,15 +93,40 @@ export default function CampaignsPro() {
     since, until,
   }), [scope.clientId, scope.businessId, scope.adAccountId, since, until]);
 
+  const createBusinesses = useMemo(
+    () => scope.businesses.filter((item) => item.clientId === createClientId && item.status === 'active'),
+    [scope.businesses, createClientId],
+  );
+
   const createAccounts = useMemo(
     () => scope.accounts.filter((item) =>
-      item.clientId === scope.clientId
+      item.clientId === createClientId
+      && item.businessId === createBusinessId
       && item.isAssigned
       && item.isActive
-      && (!scope.businessId || item.businessId === scope.businessId)
     ),
-    [scope.accounts, scope.clientId, scope.businessId],
+    [scope.accounts, createClientId, createBusinessId],
   );
+
+  useEffect(() => {
+    if (!showCreate) return;
+    const initialClient = scope.clients.some((item) => item.id === createClientId)
+      ? createClientId
+      : scope.clientId || scope.clients[0]?.id || '';
+    if (initialClient !== createClientId) setCreateClientId(initialClient);
+  }, [showCreate, scope.clientId, scope.clients, createClientId]);
+
+  useEffect(() => {
+    const available = scope.businesses.filter((item) => item.clientId === createClientId && item.status === 'active');
+    const preferred = available.some((item) => item.metaBusinessId === createBusinessId)
+      ? createBusinessId
+      : available.some((item) => item.metaBusinessId === scope.businessId)
+        ? scope.businessId
+        : available.length === 1
+          ? available[0].metaBusinessId
+          : '';
+    if (preferred !== createBusinessId) setCreateBusinessId(preferred);
+  }, [createClientId, scope.businesses, scope.businessId, createBusinessId]);
 
   useEffect(() => {
     const preferred = scope.adAccountId && createAccounts.some((item) => item.id === scope.adAccountId)
@@ -176,20 +203,23 @@ export default function CampaignsPro() {
 
   async function createCampaign(event: React.FormEvent) {
     event.preventDefault();
-    if (!canManage || !scope.clientId || !scope.businessId || !createAccountId || !name.trim()) return;
+    if (!canManage || !createClientId || !createBusinessId || !createAccountId || !name.trim()) return;
     setCreating(true);
     setError('');
     setNotice('');
     try {
       await api.post('/campaigns', {
-        clientId: scope.clientId,
-        businessId: scope.businessId,
+        clientId: createClientId,
+        businessId: createBusinessId,
         adAccountId: createAccountId,
         name: name.trim(),
         objective,
         ...(dailyBudget ? { dailyBudget: Number(dailyBudget.replace(',', '.')) } : {}),
         specialAdCategories: specialCategory ? [specialCategory] : [],
       });
+      scope.setClientId(createClientId);
+      scope.setBusinessId(createBusinessId);
+      scope.setAdAccountId(createAccountId);
       setName('');
       setDailyBudget('');
       setSpecialCategory('');
@@ -244,15 +274,21 @@ export default function CampaignsPro() {
     <section className="page-heading"><div><p className="section-kicker">Gerenciador</p><h1>Campanhas e anúncios</h1><p>Navegue da campanha até o anúncio individual mantendo BM, conta e período fixos. O status de campanha consulta a entrega atual da Meta e atualiza automaticamente a cada minuto.</p></div><div className="flex flex-wrap gap-2">{canManage && <button type="button" className="primary-button" onClick={() => setShowCreate((value) => !value)}><Plus size={14} />{showCreate ? 'Fechar criação' : 'Nova campanha'}</button>}<button className="secondary-button" onClick={() => { void load(true); }} disabled={loading}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} />Atualizar agora</button></div></section>
 
     {showCreate && canManage && <form onSubmit={createCampaign} className="corporate-card p-4">
-      <div className="mb-4 flex flex-col gap-1"><p className="section-kicker">Meta Ads</p><h2 className="panel-title">Criar nova campanha</h2><p className="panel-subtitle">A campanha será criada na empresa, BM e conta selecionadas acima e permanecerá pausada até sua revisão.</p></div>
-      {!scope.clientId || !scope.businessId ? <div className="message-warning flex flex-wrap items-center justify-between gap-2"><span>Esta empresa ainda não possui uma BM vinculada. Vincule a BM correta antes de criar a campanha.</span><button type="button" className="secondary-button" onClick={() => navigate('/empresas')}>Vincular BM à empresa</button></div> : !createAccounts.length ? <div className="message-warning flex flex-wrap items-center justify-between gap-2"><span>Nenhuma conta de anúncios autorizada está vinculada a esta BM.</span><button type="button" className="secondary-button" onClick={() => navigate('/empresas')}>Configurar BM e contas</button></div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <label className="field-label">Conta de anúncio<select required className="field-control" value={createAccountId} onChange={(e) => setCreateAccountId(e.target.value)}><option value="">Selecione a conta</option>{createAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}{account.currency ? ` · ${account.currency}` : ''}</option>)}</select></label>
+      <div className="mb-4 flex flex-col gap-1"><p className="section-kicker">Meta Ads</p><h2 className="panel-title">Criar nova campanha</h2><p className="panel-subtitle">Selecione Empresa → Business Manager → Conta, como no Gerenciador de Anúncios. A campanha será criada pausada para revisão.</p></div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <label className="field-label">Empresa<select required className="field-control" value={createClientId} onChange={(e) => { setCreateClientId(e.target.value); setCreateBusinessId(''); setCreateAccountId(''); }}><option value="">Selecione a empresa</option>{scope.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+        <label className="field-label">Business Manager<select required className="field-control" value={createBusinessId} disabled={!createClientId || !createBusinesses.length} onChange={(e) => { setCreateBusinessId(e.target.value); setCreateAccountId(''); }}><option value="">{createBusinesses.length ? 'Selecione a BM' : 'Nenhuma BM vinculada'}</option>{createBusinesses.map((business) => <option key={business.id} value={business.metaBusinessId}>{business.name}</option>)}</select></label>
+        <label className="field-label">Conta de anúncio<select required className="field-control" value={createAccountId} disabled={!createBusinessId || !createAccounts.length} onChange={(e) => setCreateAccountId(e.target.value)}><option value="">{createAccounts.length ? 'Selecione a conta' : 'Nenhuma conta autorizada'}</option>{createAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}{account.currency ? ` · ${account.currency}` : ''}</option>)}</select></label>
+
+        {createClientId && !createBusinesses.length && <div className="message-warning md:col-span-2 xl:col-span-3 flex flex-wrap items-center justify-between gap-2"><span>Esta empresa ainda não possui BM vinculada. Associe a BM correta no cadastro da empresa.</span><button type="button" className="secondary-button" onClick={() => navigate('/empresas')}>Associar BM à empresa</button></div>}
+        {createBusinessId && !createAccounts.length && <div className="message-warning md:col-span-2 xl:col-span-3">A BM selecionada ainda não possui conta de anúncios autorizada para esta empresa.</div>}
+
         <label className="field-label md:col-span-1 xl:col-span-2">Nome da campanha<input required minLength={3} maxLength={200} className="field-control" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Leads WhatsApp Joinville" /></label>
         <label className="field-label">Objetivo<select className="field-control" value={objective} onChange={(e) => setObjective(e.target.value)}>{objectives.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label className="field-label">Orçamento diário<input className="field-control" inputMode="decimal" value={dailyBudget} onChange={(e) => setDailyBudget(e.target.value)} placeholder="Opcional" /><span className="mt-1 block text-[9px] font-normal text-slate-400">Valor na moeda da conta selecionada.</span></label>
         <label className="field-label">Categoria especial<select className="field-control" value={specialCategory} onChange={(e) => setSpecialCategory(e.target.value)}>{specialCategories.map(([value,label]) => <option key={value || 'none'} value={value}>{label}</option>)}</select></label>
-        <div className="flex items-end justify-end md:col-span-2 xl:col-span-3"><button type="submit" className="primary-button" disabled={creating || !createAccountId}>{creating ? 'Criando na Meta...' : 'Criar campanha pausada'}</button></div>
-      </div>}
+        <div className="flex items-end justify-end md:col-span-2 xl:col-span-3"><button type="submit" className="primary-button" disabled={creating || !createClientId || !createBusinessId || !createAccountId}>{creating ? 'Criando na Meta...' : 'Criar campanha pausada'}</button></div>
+      </div>
     </form>}
 
     {notice && <div className="rounded-[7px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-medium text-emerald-700">{notice}</div>}
