@@ -107,27 +107,40 @@ function slaMinutes(priority: string) {
 }
 
 export async function registerSupportRoutes(app: FastifyInstance) {
-  app.post('/support/presence', { preHandler: requireAuth() }, async (req) => {
+  app.post('/support/presence', { preHandler: requireAuth() }, async (req, reply) => {
     const user = req.user as AuthUser;
-    await prisma.supportPresence.upsert({
+    const body = z.object({
+      status: z.enum(['ONLINE', 'AWAY']).default('ONLINE'),
+    }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Status de atendimento inválido.'));
+
+    const presence = await prisma.supportPresence.upsert({
       where: { userId: user.id },
-      update: { organizationId: user.organizationId!, clientId: user.clientId ?? null },
-      create: { userId: user.id, organizationId: user.organizationId!, clientId: user.clientId ?? null },
+      update: {
+        organizationId: user.organizationId!,
+        clientId: user.clientId ?? null,
+        status: body.data.status,
+      },
+      create: {
+        userId: user.id,
+        organizationId: user.organizationId!,
+        clientId: user.clientId ?? null,
+        status: body.data.status,
+      },
     });
-    return ok({ online: true, at: new Date() });
+    return ok({
+      online: body.data.status === 'ONLINE',
+      status: body.data.status,
+      at: presence.lastSeenAt,
+    });
   });
 
   app.get('/support/presence', { preHandler: requireAuth() }, async (req) => {
     const user = req.user as AuthUser;
     const activeSince = new Date(Date.now() - 35_000);
-    const presences = await prisma.supportPresence.findMany({
-      where: { organizationId: user.organizationId!, lastSeenAt: { gte: activeSince } },
-      orderBy: { lastSeenAt: 'desc' },
-    });
-    const ids = presences.map((item) => item.userId);
-    const users = ids.length ? await prisma.user.findMany({
+
+    const users = await prisma.user.findMany({
       where: {
-        id: { in: ids },
         organizationId: user.organizationId!,
         isActive: true,
         ...(!isAdmin(user) ? {
@@ -145,22 +158,40 @@ export async function registerSupportRoutes(app: FastifyInstance) {
         clientId: true,
         client: { select: { name: true } },
       },
+    });
+
+    const ids = users.map((item) => item.id);
+    const presences = ids.length ? await prisma.supportPresence.findMany({
+      where: {
+        organizationId: user.organizationId!,
+        userId: { in: ids },
+      },
     }) : [];
-    const presenceById = new Map(presences.map((item) => [item.userId, item.lastSeenAt]));
+    const presenceById = new Map(presences.map((item) => [item.userId, item]));
+
     return ok(users
-      .map((item) => ({
-        id: item.id,
-        name: item.name,
-        email: item.email,
-        role: item.role,
-        clientId: item.clientId,
-        clientName: item.client?.name ?? null,
-        lastSeenAt: presenceById.get(item.id),
-      }))
+      .map((item) => {
+        const presence = presenceById.get(item.id);
+        const heartbeatActive = Boolean(presence?.lastSeenAt && presence.lastSeenAt >= activeSince);
+        const presenceStatus = presence?.status === 'AWAY' || !heartbeatActive ? 'AWAY' : 'ONLINE';
+        return {
+          id: item.id,
+          name: item.name,
+          email: item.email,
+          role: item.role,
+          clientId: item.clientId,
+          clientName: item.client?.name ?? null,
+          lastSeenAt: presence?.lastSeenAt ?? null,
+          presenceStatus,
+          online: presenceStatus === 'ONLINE',
+        };
+      })
       .sort((a, b) => {
+        const aOnline = a.presenceStatus === 'ONLINE' ? 0 : 1;
+        const bOnline = b.presenceStatus === 'ONLINE' ? 0 : 1;
         const aAdmin = adminRoles.has(a.role) ? 0 : 1;
         const bAdmin = adminRoles.has(b.role) ? 0 : 1;
-        return aAdmin - bAdmin || a.name.localeCompare(b.name);
+        return aOnline - bOnline || aAdmin - bAdmin || a.name.localeCompare(b.name);
       }));
   });
 
