@@ -126,9 +126,7 @@ const BASE_FINANCIAL_FIELDS = [
   'amount_spent',
   'balance',
   'spend_cap',
-  'funding_source_details',
   'is_prepay_account',
-  'stored_balance_status',
   'timezone_name',
 ].join(',');
 
@@ -140,14 +138,28 @@ function isGraphRateLimit(error: any) {
 }
 
 async function getFinancialAccountGraph(path: string, token: string) {
-  const base = await getGraph(path, token, { fields: BASE_FINANCIAL_FIELDS });
-  const isPrepay = Boolean(base?.is_prepay_account)
-    || String(base?.stored_balance_status || '').toLowerCase() === 'prepay';
-  if (!isPrepay) return base;
+  // A consulta base contém somente campos que não devem derrubar o painel inteiro
+  // quando uma permissão financeira opcional não está disponível.
+  let merged = await getGraph(path, token, { fields: BASE_FINANCIAL_FIELDS });
 
-  // CurrencyAmount pode ser restrito por conta/permissão. Primeiro pedimos somente
-  // o subcampo essencial `amount`, que é suficiente para reproduzir os fundos
-  // disponíveis reais sem fazer uma expansão mais ampla invalidar a consulta.
+  // Campos de cobrança/permissão são consultados isoladamente. Uma recusa da Meta
+  // não pode apagar gasto, status, moeda ou demais dados que já foram lidos.
+  for (const fields of ['stored_balance_status', 'user_tasks', 'funding_source_details']) {
+    try {
+      const extra = await getGraph(path, token, { fields });
+      merged = { ...merged, ...extra };
+    } catch (error: any) {
+      if (isGraphRateLimit(error)) break;
+    }
+  }
+
+  const isPrepay = Boolean(merged?.is_prepay_account)
+    || String(merged?.stored_balance_status || '').toLowerCase() === 'prepay';
+  if (!isPrepay) return merged;
+
+  // A forma total_prepay_balance.fields(amount) é suportada pela Graph API.
+  // Mantemos fallbacks independentes para evitar que um campo opcional invalide
+  // toda a consulta financeira.
   const currencyAmountFields = 'amount,amount_in_hundredths,currency,offsetted_amount';
   const optionalFieldSets = [
     'total_prepay_balance.fields(amount)',
@@ -160,7 +172,6 @@ async function getFinancialAccountGraph(path: string, token: string) {
     'prepay_account_balance',
   ];
 
-  let merged = base;
   for (const fields of optionalFieldSets) {
     try {
       const extra = await getGraph(path, token, { fields });
