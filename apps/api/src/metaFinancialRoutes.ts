@@ -82,6 +82,26 @@ async function getPagedGraph(path: string, token: string, params: Record<string,
   return rows;
 }
 
+function billingUrl(accountId: string, businessId?: string | null, tab = 'account_billing_settings') {
+  const params = new URLSearchParams({
+    act: String(accountId).replace(/^act_/, ''),
+    page: 'account_settings',
+    tab,
+  });
+  if (businessId) params.set('business_id', businessId);
+  return `https://www.facebook.com/ads/manager/account_settings/account_billing/?${params.toString()}`;
+}
+
+function fundingSourceSummary(value: any) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    type: value.type ?? value.funding_source_type ?? null,
+    displayString: value.display_string ?? value.displayString ?? value.description ?? null,
+    lastFourDigits: value.last_four_digits ?? value.last4 ?? null,
+    expiration: value.expiration ?? value.expiry ?? null,
+  };
+}
+
 async function resolveClient(user: AuthUser, requestedClientId: string | undefined, reply: any) {
   const clientId = scopeClient(user, requestedClientId);
   if (!clientId) {
@@ -197,6 +217,76 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
       updatedAt: new Date().toISOString(),
       refreshRecommendedSeconds: 60,
     });
+  });
+
+  app.get('/financial/meta-payment-center', { preHandler: requireAuth() }, async (req, reply) => {
+    const user = req.user as AuthUser;
+    const query = activityQuerySchema.pick({ clientId: true, businessId: true, adAccountId: true }).safeParse(req.query);
+    if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Conta de anúncios inválida para cobrança.'));
+    const client = await resolveClient(user, query.data.clientId, reply);
+    if (!client) return;
+
+    const account = await prisma.metaAdAccount.findFirst({
+      where: {
+        id: query.data.adAccountId,
+        organizationId: user.organizationId!,
+        clientId: client.id,
+        isActive: true,
+        isAssigned: true,
+        ...(query.data.businessId ? { businessId: query.data.businessId } : {}),
+      },
+      include: { connection: true },
+    });
+    if (!account) return reply.code(404).send(fail('META_ACCOUNT_NOT_ASSIGNED', 'A conta Meta selecionada não pertence ao perfil deste usuário.'));
+    if (account.connection.status !== 'active') return reply.code(409).send(fail('META_CONNECTION_REQUIRED', 'A conexão Meta desta conta está inativa.'));
+
+    try {
+      const token = decrypt(account.connection.accessTokenEncrypted);
+      const actId = String(account.accountId).startsWith('act_') ? String(account.accountId) : `act_${account.accountId}`;
+      const data = await getGraph(actId, token, {
+        fields: 'id,account_id,name,currency,account_status,amount_spent,balance,spend_cap,funding_source_details,is_prepay_account,timezone_name',
+      });
+      const currency = String(data?.currency || account.currency || 'BRL').toUpperCase();
+      const rawAccountId = String(data?.account_id || account.accountId).replace(/^act_/, '');
+      const businessId = account.businessId || query.data.businessId || null;
+
+      return ok({
+        client: { id: client.id, name: client.name },
+        account: {
+          id: account.id,
+          accountId: rawAccountId,
+          name: String(data?.name || account.name || `Conta ${rawAccountId}`),
+          businessId,
+          businessName: account.businessName,
+          currency,
+          accountStatus: data?.account_status == null ? account.accountStatus : Number(data.account_status),
+          balance: minorToMajor(data?.balance, currency),
+          amountSpent: minorToMajor(data?.amount_spent, currency),
+          spendCap: minorToMajor(data?.spend_cap, currency),
+          isPrepayAccount: Boolean(data?.is_prepay_account),
+          fundingSource: fundingSourceSummary(data?.funding_source_details),
+          timezone: data?.timezone_name || account.timezone || null,
+        },
+        actions: {
+          addFundsUrl: billingUrl(rawAccountId, businessId, 'account_billing_settings'),
+          paymentMethodsUrl: billingUrl(rawAccountId, businessId, 'account_billing_settings'),
+          paymentActivityUrl: billingUrl(rawAccountId, businessId, 'account_billing_activity'),
+          receiptsUrl: billingUrl(rawAccountId, businessId, 'account_billing_activity'),
+        },
+        supportedInPlatform: {
+          readBalance: true,
+          readSpend: true,
+          readFundingSourceSummary: true,
+          readBillingActivity: true,
+          addPaymentMethodDirectly: false,
+          addFundsDirectly: false,
+        },
+        securityNotice: 'Dados sensíveis de cartão, Pix ou boleto não são coletados nem armazenados pela Gestão Ads. Inclusão de forma de pagamento e recarga são concluídas no fluxo oficial da Meta, respeitando as permissões do usuário na conta de anúncios.',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      return reply.code(502).send(fail('META_PAYMENT_CENTER_ERROR', 'Não foi possível consultar os dados de cobrança desta conta Meta.', { detail: process.env.NODE_ENV === 'production' ? undefined : graphError(error) }));
+    }
   });
 
   app.get('/financial/meta-activity', { preHandler: requireAuth() }, async (req, reply) => {
