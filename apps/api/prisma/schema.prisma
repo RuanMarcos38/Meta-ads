@@ -410,6 +410,9 @@ model SupportConversation {
   firstResponseAt     DateTime?
   lastAdminReadAt     DateTime?
   lastRequesterReadAt DateTime?
+  aiEnabled           Boolean                   @default(true)
+  aiLastReplyAt       DateTime?
+  humanHandoffAt      DateTime?
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
   messages            SupportMessage[]
@@ -480,4 +483,24 @@ model WhatsAppDailyDeliveryGuard {
   @@unique([organizationId, phone, localDate])
   @@index([organizationId, clientId, localDate])
   @@index([organizationId, localDate])
+}
+
+model AiCampaignHealth {
+  id             String   @id @default(uuid())
+  organizationId String
+  clientId       String
+  businessId     String?
+  campaignId     String
+  campaignName   String
+  score          Int
+  status         String
+  issuesJson     Json?
+  metricsJson    Json?
+  analyzedAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, clientId, campaignId])
+  @@index([organizationId, clientId, analyzedAt])
+  @@index([organizationId, businessId, analyzedAt])
 }
