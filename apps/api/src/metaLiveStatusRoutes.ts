@@ -73,7 +73,9 @@ async function resolvedAccounts(user: AuthUser, rawQuery: unknown, reply: any) {
     else return { accounts: [], force: parsed.data.force === 'true' };
     return null;
   }
-  const businessId = restrictedRoles.has(user.role) ? user.businessId : parsed.data.businessId;
+  const businessId = restrictedRoles.has(user.role)
+    ? (parsed.data.businessId || user.businessId)
+    : parsed.data.businessId;
   if (restrictedRoles.has(user.role) && !businessId) {
     reply.code(403).send(fail('BUSINESS_SCOPE_REQUIRED', 'Este usuário precisa estar vinculado a uma Business Manager.'));
     return null;
