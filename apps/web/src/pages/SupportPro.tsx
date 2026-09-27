@@ -209,7 +209,9 @@ export default function SupportPro(){
     stream.getTracks().forEach(t=>t.stop());
     setRecording(false);
     if(blob.size>8*1024*1024){setError('Áudio acima de 8 MB.');return;}
-    setAttachments(current=>[...current,{name:`audio-${Date.now()}.webm`,mime:blob.type||'audio/webm',dataBase64:await base64(blob),kind:'AUDIO',size:blob.size}].slice(0,5));
+    const encoded=await base64(blob);
+    const audioAttachment:Attachment={name:`audio-${Date.now()}.webm`,mime:blob.type||'audio/webm',dataBase64:encoded,kind:'AUDIO',size:blob.size};
+    setAttachments(current=>[...current,audioAttachment].slice(0,5));
    };
    recorder.current=rec;rec.start();setRecording(true);
   }catch{setError('Não foi possível acessar o microfone.');}
