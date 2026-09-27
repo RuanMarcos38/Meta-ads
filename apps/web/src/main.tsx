@@ -19,6 +19,7 @@ import GoogleAnalytics from './pages/GoogleAnalytics';
 import Audit from './pages/Audit';
 import AgencyOverview from './pages/AgencyOverview';
 import Settings from './pages/Settings';
+import BillingPayments from './pages/BillingPayments';
 import { useAuth } from './store';
 
 function Private({ children }: { children: React.ReactNode }) {
@@ -66,6 +67,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="relatorios" element={<Reports />} />
           <Route path="alertas" element={<Alerts />} />
           <Route path="atendimento" element={<Support />} />
+          <Route path="pagamentos" element={<BillingPayments />} />
           <Route path="usuarios" element={<Roles roles={['SUPER_ADMIN','AGENCY_ADMIN','MANAGER']}><UsersAccess /></Roles>} />
           <Route path="integracoes" element={<Roles roles={['SUPER_ADMIN','AGENCY_ADMIN']}><Integrations /></Roles>} />
           <Route path="auditoria" element={<Roles roles={['SUPER_ADMIN','AGENCY_ADMIN']}><Audit /></Roles>} />
