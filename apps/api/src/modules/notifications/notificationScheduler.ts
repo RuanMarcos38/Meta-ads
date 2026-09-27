@@ -87,7 +87,7 @@ function graphBaseUrl() {
   return `https://graph.facebook.com/${env.meta.apiVersion}`;
 }
 
-function whatsappReady() {
+export function whatsappReady() {
   return Boolean(env.whatsapp.baseUrl && env.whatsapp.apiKey && env.whatsapp.instance);
 }
 
@@ -164,7 +164,7 @@ async function updateDailyWhatsAppReservation(id: string, status: 'SENT' | 'FAIL
   }).catch(() => undefined);
 }
 
-async function sendWhatsAppOncePerDay(input: {
+export async function sendWhatsAppOncePerDay(input: {
   organizationId: string;
   clientId: string;
   phone: string;

@@ -223,4 +223,11 @@ export const env = {
     apiKey: process.env.EVOLUTION_API_KEY?.trim() || process.env.WHATSAPP_API_KEY?.trim() || '',
     instance: process.env.EVOLUTION_INSTANCE?.trim() || process.env.WHATSAPP_INSTANCE?.trim() || '',
   },
+  ai: {
+    apiKey: process.env.OPENAI_API_KEY?.trim() || '',
+    model: process.env.OPENAI_MODEL?.trim() || 'gpt-5-mini',
+    adminWhatsapp: process.env.AI_ADMIN_WHATSAPP?.trim() || '5547999371478',
+    analysisIntervalMinutes: Math.max(5, Number.parseInt(process.env.AI_ANALYSIS_INTERVAL_MINUTES?.trim() || '15', 10) || 15),
+    dailyReportHour: Math.min(23, Math.max(0, Number.parseInt(process.env.AI_DAILY_REPORT_HOUR?.trim() || '8', 10) || 8)),
+  },
 };

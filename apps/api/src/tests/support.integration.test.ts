@@ -138,6 +138,35 @@ suite('internal support flow', () => {
     expect(crossCompany.statusCode).toBe(403);
   });
 
+  it('desativa a IA e encaminha ao humano quando o cliente solicita gestor', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/support/conversations',
+      headers: { authorization: `Bearer ${sameCompanyTokenA}` },
+      payload: {
+        type: 'CHAT',
+        recipientUserId: adminUserId,
+        message: 'Quero falar com o gestor de tráfego, por favor.',
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const id = created.json().data.id as string;
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const row = await prisma.supportConversation.findUnique({
+        where: { id },
+        select: { aiEnabled: true, humanHandoffAt: true, status: true },
+      });
+      if (row?.humanHandoffAt) {
+        expect(row.aiEnabled).toBe(false);
+        expect(row.status).toBe('PENDING');
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    throw new Error('Handoff humano não foi registrado pelo agente IA.');
+  });
+
   it('abre uma conversa interna e mantém histórico', async () => {
     const created = await app.inject({
       method: 'POST',
