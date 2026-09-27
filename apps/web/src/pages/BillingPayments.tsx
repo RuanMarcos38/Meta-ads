@@ -14,7 +14,7 @@ type PaymentCenter={
   client:{id:string;name:string};
   account:{
     id:string;accountId:string;name:string;businessId?:string|null;businessName?:string|null;
-    currency:string;accountStatus?:number|null;balance:number;amountSpent:number;spendCap:number;
+    currency:string;accountStatus?:number|null;balance:number|null;balanceLabel?:string;amountDue?:number;amountSpent:number;spendCap:number;
     isPrepayAccount:boolean;fundingSource?:{type?:string|null;displayString?:string|null;lastFourDigits?:string|null;expiration?:string|null}|null;
   };
   paymentProfile:{
@@ -94,8 +94,8 @@ export default function BillingPayments(){
         <div className="corporate-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="section-kicker">Fundos disponíveis</p>
-              <strong className="mt-2 block text-[30px] font-medium tracking-[-0.04em] text-slate-900">{loading?'Atualizando...':money(account?.balance,account?.currency)}</strong>
+              <p className="section-kicker">{account?.balanceLabel||'Fundos disponíveis'}</p>
+              <strong className="mt-2 block text-[30px] font-medium tracking-[-0.04em] text-slate-900">{loading?'Atualizando...':account?.balance==null?'Indisponível':money(account.balance,account.currency)}</strong>
               <p className="mt-1 text-[9px] text-slate-500">{account?.businessName||'Gerenciador selecionado'} · {account?.name||'Conta de anúncios'}</p>
             </div>
             <button className="secondary-button" onClick={()=>{void load();}} disabled={loading}><RefreshCw size={13} className={loading?'animate-spin':''}/>Atualizar saldo</button>
