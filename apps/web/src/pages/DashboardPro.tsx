@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, BarChart3, CalendarRange, CheckCircle2, Circle, Database, Megaphone, MessageCircle, MousePointerClick, RefreshCw, ShoppingCart, Target, TrendingDown, TrendingUp, WalletCards } from 'lucide-react';
+import { Activity, BarChart3, CalendarRange, CheckCircle2, Circle, Megaphone, MessageCircle, MousePointerClick, RefreshCw, ShoppingCart, Target, TrendingDown, TrendingUp, WalletCards } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../api';
 import { useScope } from '../store';
@@ -29,7 +29,6 @@ const yesterday = () => { const d = new Date(); d.setDate(d.getDate() - 1); retu
 const previousMonth = () => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth() - 1, 1); const end = new Date(now.getFullYear(), now.getMonth(), 0); return { since: iso(start), until: iso(end) }; };
 const br = (value: string) => value.split('-').reverse().join('/');
 const statusLabel=(value?:string|null)=>value==='ACTIVE'?'Ativa':value==='PAUSED'?'Pausada':value==='ARCHIVED'?'Arquivada':value==='DELETED'?'Excluída':value==='IN_PROCESS'?'Em processamento':value==='WITH_ISSUES'?'Com problemas':value||'—';
-const tokenLabel=(value?:string)=>value==='valid'?'válido':value==='expired'?'expirado':value==='invalid'?'inválido':value==='unknown'?'não verificado':value||'—';
 const objectiveLabel=(value?:string|null)=>({OUTCOME_AWARENESS:'Reconhecimento',OUTCOME_TRAFFIC:'Tráfego',OUTCOME_ENGAGEMENT:'Engajamento',OUTCOME_LEADS:'Cadastros',OUTCOME_SALES:'Vendas',OUTCOME_APP_PROMOTION:'Promoção de aplicativo',LINK_CLICKS:'Cliques no link',CONVERSIONS:'Conversões',LEAD_GENERATION:'Geração de cadastros',MESSAGES:'Mensagens',REACH:'Alcance',BRAND_AWARENESS:'Reconhecimento da marca'} as Record<string,string>)[String(value||'')]||value||'—';
 
 function Card({ label, value, helper, icon: Icon }: { label: string; value: string; helper: string; icon: typeof WalletCards }) {
@@ -98,7 +97,7 @@ export default function DashboardPro() {
       const healthRows = healthResponse?.data?.data;
       setHealth(Array.isArray(healthRows) ? healthRows[0] || null : null);
     } catch (requestError: any) {
-      setError(requestError?.response?.data?.error?.message || requestError?.response?.data?.message || 'Não foi possível carregar as métricas deste escopo.');
+      setError('Não foi possível carregar os dados neste momento. Tente novamente em instantes.');
     } finally {
       if (!silent) setLoading(false);
     }
@@ -120,7 +119,7 @@ export default function DashboardPro() {
       }
       await load(true);
     } catch (requestError: any) {
-      setError(requestError?.response?.data?.error?.message || 'A sincronização não foi concluída.');
+      setError('A atualização não foi concluída. Tente novamente em instantes.');
     } finally { setSyncing(false); }
   }
 
@@ -156,6 +155,5 @@ export default function DashboardPro() {
 
     <section className="corporate-card overflow-hidden"><div className="flex flex-col gap-3 border-b border-[#e2e7e4] p-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="panel-title">Campanhas</h2><p className="panel-subtitle">Clique em uma campanha para recalcular todo o painel apenas com ela.</p></div><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar campanha" className="field-control sm:w-[260px]" /></div><div className="table-scroll"><table className="corporate-table"><thead><tr><th>Campanha</th><th>Status</th><th>Conta</th><th>Investimento</th><th>Alcance</th><th>Impressões</th><th>Leads</th><th>CPL</th><th>Conversas</th><th>CTR</th><th>CPC</th><th>CPM</th><th>Compras</th><th>CPA</th><th>ROAS</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id} className={campaignId === row.metaCampaignId ? 'bg-[#f2f7f4]' : ''} onClick={() => setCampaignId(row.metaCampaignId)}><td><strong>{row.name}</strong><small>{objectiveLabel(row.objective)}</small></td><td><span className={`status-chip ${row.status==='ACTIVE'?'status-success':'status-neutral'}`}>{row.status==='ACTIVE'&&<Circle size={7} fill="currentColor"/>}{statusLabel(row.status)}</span></td><td>{row.adAccount?.name || row.adAccount?.accountId}</td><td>{money(row.spend)}</td><td>{integer(row.reach)}</td><td>{integer(row.impressions)}</td><td>{integer(row.leads)}</td><td>{money(row.costPerLead)}</td><td>{integer(row.conversations)}</td><td>{pct(row.ctr)}</td><td>{money(row.cpc)}</td><td>{money(row.cpm)}</td><td>{integer(row.purchases)}</td><td>{money(row.costPerPurchase)}</td><td>{decimal(row.roas)}x</td></tr>)}{!filtered.length && <tr><td colSpan={15}><div className="empty-state"><Megaphone size={20} /><span>Nenhuma campanha encontrada neste escopo e período.</span></div></td></tr>}</tbody></table></div></section>
 
-    <section className="grid gap-3 md:grid-cols-3"><div className="corporate-card p-4"><Database size={16} className="text-[#176846]" /><h3 className="mt-2 text-[12px] font-semibold">Qualidade dos dados</h3><p className="mt-1 text-[10px] text-slate-500">{health?.earliestDate ? `Histórico de ${new Date(health.earliestDate).toLocaleDateString('pt-BR')} até ${health.latestDate ? new Date(health.latestDate).toLocaleDateString('pt-BR') : 'hoje'}.` : 'Histórico ainda não identificado.'}</p></div><div className="corporate-card p-4"><CheckCircle2 size={16} className="text-[#176846]" /><h3 className="mt-2 text-[12px] font-semibold">Integração</h3><p className="mt-1 text-[10px] text-slate-500">Token: {tokenLabel(health?.tokenStatus)} · {health?.assignedAccountCount || 0} conta(s) autorizada(s).</p></div><div className="corporate-card p-4"><Megaphone size={16} className="text-[#176846]" /><h3 className="mt-2 text-[12px] font-semibold">Campanhas no escopo</h3><p className="mt-1 text-[10px] text-slate-500">{campaigns.length} campanha(s), sendo {campaigns.filter((item) => item.status === 'ACTIVE').length} ativa(s).</p></div></section>
   </div>;
 }
