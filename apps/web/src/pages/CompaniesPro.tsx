@@ -511,9 +511,18 @@ export default function CompaniesPro() {
     {canAdmin && <form onSubmit={create} className="filter-panel">
       <div className="flex flex-col gap-2 sm:flex-row">
         <input className="field-control flex-1" placeholder="Nome da nova empresa" value={name} onChange={(e) => setName(e.target.value)} required />
-        <button className="primary-button" disabled={newBusinessLoading || creating || newMetaConnecting || !newBusinessLoaded}>
+        <button
+          className="primary-button"
+          disabled={newBusinessLoading || creating || newMetaConnecting || !name.trim()}
+        >
           {newBusinessLoading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
-          {newBusinessLoading ? 'Carregando BMs...' : creating ? 'Cadastrando...' : 'Cadastrar empresa'}
+          {newBusinessLoading
+            ? 'Carregando BMs...'
+            : creating
+              ? 'Cadastrando...'
+              : newBusinessLoaded
+                ? 'Cadastrar empresa'
+                : 'Continuar: escolher BM'}
         </button>
       </div>
 
