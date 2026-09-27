@@ -164,6 +164,7 @@ const FINANCIAL_RATE_LIMIT_BACKOFF_MS = 5 * 60 * 1000;
 const financialCache = new Map<string, FinancialFetchResult>();
 const financialInflight = new Map<string, Promise<FinancialFetchResult>>();
 const financialRateLimitedUntil = new Map<string, number>();
+const financialRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 async function readConfirmedBalanceSnapshot(
   organizationId: string,
@@ -225,8 +226,8 @@ async function getFinancialAccountGraph(path: string, token: string) {
   }
 
   const optionalFieldSets = [
-    'total_prepay_balance',
-    'prepay_account_balance',
+    'total_prepay_balance.fields(amount,amount_in_hundredths,currency)',
+    'prepay_account_balance.fields(amount,amount_in_hundredths,currency)',
   ];
 
   for (const fields of optionalFieldSets) {
@@ -251,6 +252,64 @@ type FinancialConnectionCandidate = {
   status: string;
   accessTokenEncrypted: string;
 };
+
+function scheduleFinancialBalanceRetry(input: {
+  cacheKey: string;
+  path: string;
+  token: string;
+  connectionId: string;
+  organizationId: string;
+  accountDbId: string;
+  currencyHint: string;
+}) {
+  if (financialRetryTimers.has(input.cacheKey)) return;
+
+  const timer = setTimeout(() => {
+    financialRetryTimers.delete(input.cacheKey);
+    void (async () => {
+      try {
+        const graph = await getFinancialAccountGraph(input.path, input.token);
+        const data = graph.data;
+        const currency = String(data?.currency || input.currencyHint || 'BRL').toUpperCase();
+        const displayedBalance = resolveDisplayedBalance(data, currency);
+
+        if (displayedBalance.value != null) {
+          const snapshot: ConfirmedBalanceSnapshot = {
+            value: displayedBalance.value,
+            currency,
+            label: displayedBalance.label,
+            source: displayedBalance.source,
+            confirmedAt: new Date().toISOString(),
+          };
+          await persistConfirmedBalanceSnapshot(input.organizationId, input.accountDbId, snapshot);
+          financialRateLimitedUntil.delete(input.cacheKey);
+          financialCache.set(input.cacheKey, {
+            data,
+            token: input.token,
+            connectionId: input.connectionId,
+            fetchedAt: new Date().toISOString(),
+            fromCache: false,
+            rateLimited: false,
+            balanceSnapshot: snapshot,
+          });
+          return;
+        }
+
+        if (graph.rateLimited) {
+          financialRateLimitedUntil.set(input.cacheKey, Date.now() + FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+          scheduleFinancialBalanceRetry(input);
+        }
+      } catch (error: any) {
+        if (isGraphRateLimit(error)) {
+          financialRateLimitedUntil.set(input.cacheKey, Date.now() + FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+          scheduleFinancialBalanceRetry(input);
+        }
+      }
+    })();
+  }, FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+
+  financialRetryTimers.set(input.cacheKey, timer);
+}
 
 async function getFinancialAccountWithFallback(
   path: string,
@@ -321,6 +380,15 @@ async function getFinancialAccountWithFallback(
 
         if (graph.rateLimited) {
           financialRateLimitedUntil.set(cacheKey, Date.now() + FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+          scheduleFinancialBalanceRetry({
+            cacheKey,
+            path,
+            token,
+            connectionId: connection.id,
+            organizationId,
+            accountDbId,
+            currencyHint: currency,
+          });
         }
 
         const persistedSnapshot = liveSnapshot
@@ -353,6 +421,16 @@ async function getFinancialAccountWithFallback(
         lastError = error;
         if (isGraphRateLimit(error)) {
           financialRateLimitedUntil.set(cacheKey, Date.now() + FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+          const token = decrypt(connection.accessTokenEncrypted);
+          scheduleFinancialBalanceRetry({
+            cacheKey,
+            path,
+            token,
+            connectionId: connection.id,
+            organizationId,
+            accountDbId,
+            currencyHint,
+          });
           if (cached) return { ...cached, fromCache: true, rateLimited: true };
           break;
         }
