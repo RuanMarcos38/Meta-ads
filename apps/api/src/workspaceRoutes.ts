@@ -29,7 +29,8 @@ function effectiveClientId(user: AuthUser, requested?: string) {
 
 function effectiveBusinessId(user: AuthUser, requested?: string) {
   if (tenantRoles.has(user.role)) {
-    if (hasMultiClientAccess(user)) return requested;
+    if (requested) return requested;
+    if (hasMultiClientAccess(user)) return undefined;
     return user.businessId || '__NO_BUSINESS__';
   }
   return requested;
@@ -293,9 +294,8 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     }
 
     const lockedClientId = multiClient ? undefined : effectiveClientId(user, query.data.clientId);
-    const lockedBusinessId = multiClient ? undefined : effectiveBusinessId(user);
-    if (tenant && !multiClient && (!lockedClientId || lockedBusinessId === '__NO_BUSINESS__')) {
-      return reply.code(403).send(fail('TENANT_SCOPE_REQUIRED', 'Este acesso precisa estar vinculado a uma empresa e uma BM.'));
+    if (tenant && !multiClient && !lockedClientId) {
+      return reply.code(403).send(fail('TENANT_SCOPE_REQUIRED', 'Este acesso precisa estar vinculado a uma empresa.'));
     }
 
     const allowedClientIds = multiClient ? authorizedClientIds(user) : [];
@@ -316,7 +316,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
         organizationId: user.organizationId!,
         clientId: { in: clientIds },
         status: 'active',
-        ...(!multiClient && lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? { metaBusinessId: lockedBusinessId } : {}),
       },
       orderBy: [{ clientId: 'asc' }, { name: 'asc' }],
     }) : [];
@@ -325,7 +324,6 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
         organizationId: user.organizationId!,
         clientId: { in: clientIds },
         ...(tenant ? { isAssigned: true } : {}),
-        ...(!multiClient && lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? { businessId: lockedBusinessId } : {}),
       },
       select: {
         id: true, clientId: true, businessManagerId: true, businessId: true, businessName: true,
@@ -335,12 +333,19 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
       orderBy: [{ businessName: 'asc' }, { name: 'asc' }],
     }) : [];
 
+    const primaryBusinessId = !multiClient && user.businessId
+      && businesses.some((item) => item.clientId === lockedClientId && item.metaBusinessId === user.businessId)
+      ? user.businessId
+      : !multiClient
+        ? businesses.find((item) => item.clientId === lockedClientId)?.metaBusinessId || null
+        : null;
+
     return ok({
       role: user.role,
       tenantLocked: tenant && !multiClient,
       multiClient,
       selectedClientId: multiClient ? (query.data.clientId || null) : lockedClientId || null,
-      selectedBusinessId: multiClient ? null : lockedBusinessId && lockedBusinessId !== '__NO_BUSINESS__' ? lockedBusinessId : null,
+      selectedBusinessId: primaryBusinessId,
       clients,
       businesses,
       accounts,
