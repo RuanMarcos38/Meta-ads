@@ -40,6 +40,9 @@ export default function UsersAccess(){
  const[companyLegalName,setCompanyLegalName]=useState('');
  const[companyEmail,setCompanyEmail]=useState('');
  const[companyPhone,setCompanyPhone]=useState('');
+ const[newCompanyBusinesses,setNewCompanyBusinesses]=useState<DiscoveredBusiness[]>([]);
+ const[newCompanyBmLoaded,setNewCompanyBmLoaded]=useState(false);
+ const[newCompanyBmLoading,setNewCompanyBmLoading]=useState(false);
  const[bmSetupClientId,setBmSetupClientId]=useState('');
  const[bmSetupBusinesses,setBmSetupBusinesses]=useState<DiscoveredBusiness[]>([]);
  const[bmSetupLoading,setBmSetupLoading]=useState(false);
@@ -141,23 +144,58 @@ export default function UsersAccess(){
   finally{setBmSetupSaving(false);}
  }
 
+ async function discoverNewCompanyBusinesses(){
+  if(!isAdmin)return;
+  setNewCompanyBmLoading(true);setError('');setSuccess('');
+  try{
+   const r=await api.post('/workspace/business-managers/discover-for-new-client',{});
+   const businesses=Array.isArray(r.data?.data?.businesses)?r.data.data.businesses:[];
+   setNewCompanyBusinesses(businesses.map((item:any)=>({
+    businessId:String(item.businessId||''),businessName:String(item.businessName||item.businessId||'BM'),adminEmail:item.adminEmail||null,
+    selected:false,accountCount:Number(item.accountCount||0),accounts:Array.isArray(item.accounts)?item.accounts.map((account:any)=>({accountId:String(account.accountId||''),name:String(account.name||account.accountId||'Conta'),currency:account.currency||null,accountStatus:account.accountStatus??null,selected:false})):[],
+   })));
+   setNewCompanyBmLoaded(true);
+   if(!businesses.length)setError('Nenhuma Business Manager foi encontrada na conexão Meta disponível.');
+  }catch(e:any){
+   setNewCompanyBusinesses([]);setNewCompanyBmLoaded(false);
+   setError(e?.response?.data?.error?.message||'Não foi possível carregar as Business Managers disponíveis.');
+  }finally{setNewCompanyBmLoading(false);}
+ }
+
+ function toggleNewCompanyBm(targetBusinessId:string){
+  setNewCompanyBusinesses(current=>current.map(item=>{
+   if(item.businessId!==targetBusinessId)return item;
+   const selected=!item.selected;
+   return {...item,selected,accounts:item.accounts.map(account=>({...account,selected}))};
+  }));
+ }
+ function toggleNewCompanyAccount(targetBusinessId:string,targetAccountId:string){
+  setNewCompanyBusinesses(current=>current.map(item=>item.businessId!==targetBusinessId?item:{...item,accounts:item.accounts.map(account=>account.accountId===targetAccountId?{...account,selected:!account.selected}:account)}));
+ }
+
  async function createCompany(e:React.FormEvent){
   e.preventDefault();
   if(!isAdmin||!companyName.trim())return;
+  if(!newCompanyBmLoaded){await discoverNewCompanyBusinesses();return;}
+  const selected=newCompanyBusinesses.filter(item=>item.selected);
+  if(!selected.length){setError('Selecione pelo menos uma Business Manager. A BM é obrigatória no cadastro da empresa.');return;}
+
   setCompanySaving(true);setError('');setSuccess('');
   try{
-   const r=await api.post('/clients',{
+   const r=await api.post('/workspace/clients/create-with-business-managers',{
     name:companyName.trim(),
     ...(companyLegalName.trim()?{companyName:companyLegalName.trim()}:{}),
     ...(companyEmail.trim()?{email:companyEmail.trim().toLowerCase()}:{}),
     ...(companyPhone.trim()?{phone:companyPhone.trim()}:{}),
+    selections:selected.map(item=>({businessId:item.businessId,accountIds:item.accounts.filter(account=>account.selected).map(account=>account.accountId)})),
    });
-   const created=r.data?.data;
+   const created=r.data?.data?.client;
    setCompanyName('');setCompanyLegalName('');setCompanyEmail('');setCompanyPhone('');
-   setSuccess('Empresa cadastrada. Selecione abaixo somente as BMs e contas de anúncios que pertencem a ela.');
+   setNewCompanyBusinesses([]);setNewCompanyBmLoaded(false);
+   setSuccess(selected.length>1?'Empresa cadastrada com '+selected.length+' BMs. O cliente verá somente estas BMs e suas contas autorizadas.':'Empresa cadastrada com a BM obrigatória vinculada.');
    window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
-   if(created?.id){scope.setClientId(created.id);setClientId(created.id);setBusinessId('');setAdditionalClientIds([]);await openBmSetup(created.id);}
-  }catch(err:any){setError(err?.response?.data?.error?.message||'Não foi possível cadastrar a empresa.');}
+   if(created?.id){scope.setClientId(created.id);setClientId(created.id);setBusinessId(created.metaBusinessId||'');setAdditionalClientIds([]);await loadBusinessOptions(created.id,false);}
+  }catch(err:any){setError(err?.response?.data?.error?.message||'Não foi possível cadastrar a empresa com as BMs selecionadas.');}
   finally{setCompanySaving(false);}
  }
 
@@ -211,14 +249,20 @@ export default function UsersAccess(){
   {success&&<div className="message-success">{success}</div>}
 
   {isAdmin&&<form onSubmit={createCompany} className="filter-panel">
-   <div className="mb-3 flex items-center gap-2"><Building2 size={15} className="text-[#2563eb]"/><div><h2 className="panel-title">Nova empresa</h2><p className="panel-subtitle">Cadastre a empresa sem sair desta tela. Depois escolha somente as BMs e contas que realmente pertencem a ela.</p></div></div>
+   <div className="mb-3 flex items-center gap-2"><Building2 size={15} className="text-[#2563eb]"/><div><h2 className="panel-title">Nova empresa</h2><p className="panel-subtitle">A BM agora faz parte obrigatória do cadastro. Para clientes multiempresa, selecione todas as BMs que pertencem ao perfil desta empresa.</p></div></div>
    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
     <label className="field-label">Nome da empresa<input className="field-control" value={companyName} onChange={e=>setCompanyName(e.target.value)} required placeholder="Ex.: ECOJOI"/></label>
     <label className="field-label">Razão social<input className="field-control" value={companyLegalName} onChange={e=>setCompanyLegalName(e.target.value)} placeholder="Opcional"/></label>
     <label className="field-label">E-mail da empresa<input className="field-control" type="email" value={companyEmail} onChange={e=>setCompanyEmail(e.target.value)} placeholder="Opcional"/></label>
     <label className="field-label">Telefone / WhatsApp<input className="field-control" value={companyPhone} onChange={e=>setCompanyPhone(e.target.value)} placeholder="Ex.: (47) 99999-9999"/></label>
    </div>
-   <div className="mt-3 flex flex-wrap justify-end gap-2">{clientId&&<button type="button" className="secondary-button" onClick={()=>{void openBmSetup(clientId);}}><BriefcaseBusiness size={14}/>Configurar BMs da empresa atual</button>}<button className="primary-button" disabled={companySaving||!companyName.trim()}><Plus size={14}/>{companySaving?'Cadastrando':'Cadastrar empresa'}</button></div>
+
+   {newCompanyBmLoaded&&<div className="mt-4 border-t border-[#e1e6e3] pt-4">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h3 className="panel-title">BMs autorizadas no perfil</h3><p className="panel-subtitle">Marque uma ou mais BMs. Ao selecionar uma BM, as contas dela são marcadas por padrão e podem ser ajustadas.</p></div><button type="button" className="secondary-button" disabled={newCompanyBmLoading} onClick={()=>{void discoverNewCompanyBusinesses();}}><RefreshCw size={13} className={newCompanyBmLoading?'animate-spin':''}/>Atualizar BMs</button></div>
+    <div className="grid gap-3 xl:grid-cols-2">{newCompanyBusinesses.map(bm=><article key={bm.businessId} className={'rounded-[8px] border p-3 '+(bm.selected?'border-blue-200 bg-blue-50/40':'border-[#dfe5e2] bg-white')}><label className="flex cursor-pointer items-start gap-2"><input className="mt-1" type="checkbox" checked={bm.selected} onChange={()=>toggleNewCompanyBm(bm.businessId)}/><span className="min-w-0"><strong className="block text-[12px] font-semibold text-slate-700">{bm.businessName}</strong><small className="block text-[10px] text-slate-500">ID {bm.businessId} · {bm.accounts.length} conta{bm.accounts.length===1?'':'s'}</small></span></label>{bm.selected&&<div className="mt-3 space-y-1.5 border-t border-[#e2e7e4] pt-2"><p className="mb-2 text-[10px] font-semibold text-slate-600">Contas autorizadas nesta BM</p>{bm.accounts.map(account=><label key={account.accountId} className="flex cursor-pointer items-center gap-2 rounded-[6px] border border-[#e3e8e5] bg-white px-2.5 py-2 text-[10px] text-slate-600"><input type="checkbox" checked={account.selected} onChange={()=>toggleNewCompanyAccount(bm.businessId,account.accountId)}/><span className="min-w-0 flex-1"><strong className="block truncate font-medium text-slate-700">{account.name}</strong><small className="text-slate-400">Conta {account.accountId}{account.currency?' · '+account.currency:''}</small></span></label>)}{!bm.accounts.length&&<p className="text-[10px] text-slate-400">Esta BM não retornou contas de anúncios.</p>}</div>}</article>)}{!newCompanyBusinesses.length&&<div className="empty-state corporate-card col-span-full"><BriefcaseBusiness size={20}/><span>Nenhuma BM disponível. Confirme a conexão Meta em Integrações.</span></div>}</div>
+   </div>}
+
+   <div className="mt-3 flex flex-wrap justify-end gap-2">{clientId&&<button type="button" className="secondary-button" onClick={()=>{void openBmSetup(clientId);}}><BriefcaseBusiness size={14}/>Configurar BMs da empresa atual</button>}<button className="primary-button" disabled={companySaving||newCompanyBmLoading||!companyName.trim()}>{newCompanyBmLoading?<RefreshCw size={14} className="animate-spin"/>:<Plus size={14}/>} {newCompanyBmLoading?'Carregando BMs...':newCompanyBmLoaded?(companySaving?'Cadastrando':'Cadastrar empresa'):'Continuar: escolher BM'}</button></div>
   </form>}
 
   {isAdmin&&bmSetupClientId&&<section className="filter-panel bm-company-panel">
