@@ -167,6 +167,8 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     const user = req.user as AuthUser;
     const body = z.object({
+      clientId: z.string().uuid().optional(),
+      businessId: z.string().trim().min(1).optional(),
       adAccountId: z.string().uuid(),
       name: z.string().trim().min(3).max(200),
       objective: z.enum(CAMPAIGN_OBJECTIVES),
@@ -176,8 +178,9 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
 
     if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Dados da campanha inválidos.'));
 
-    const restrictedClientId = scopeClient(user);
-    if (restrictedAccessWithoutClient(user, restrictedClientId)) {
+    const scopedClientId = scopeClient(user, body.data.clientId);
+    const scopedBusinessId = body.data.businessId || (isTenantUser(user) ? user.businessId : undefined);
+    if (restrictedAccessWithoutClient(user, scopedClientId)) {
       return reply.code(403).send(fail('CLIENT_SCOPE_REQUIRED', 'Este usuário não possui cliente associado.'));
     }
 
@@ -187,7 +190,8 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
         organizationId: user.organizationId!,
         isActive: true,
         isAssigned: true,
-        ...(restrictedClientId ? { clientId: restrictedClientId } : {}),
+        ...(scopedClientId ? { clientId: scopedClientId } : {}),
+        ...(scopedBusinessId ? { businessId: scopedBusinessId } : {}),
       },
       include: { connection: true },
     });
@@ -265,11 +269,16 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     const user = req.user as AuthUser;
     const params = z.object({ id: z.string().uuid() }).safeParse(req.params);
-    const body = z.object({ status: z.enum(['ACTIVE', 'PAUSED']) }).safeParse(req.body);
+    const body = z.object({
+      status: z.enum(['ACTIVE', 'PAUSED']),
+      clientId: z.string().uuid().optional(),
+      businessId: z.string().trim().min(1).optional(),
+    }).safeParse(req.body);
     if (!params.success || !body.success) return reply.code(400).send(fail('VALIDATION', 'Alteração de status inválida.'));
 
-    const restrictedClientId = scopeClient(user);
-    if (restrictedAccessWithoutClient(user, restrictedClientId)) {
+    const scopedClientId = scopeClient(user, body.data.clientId);
+    const scopedBusinessId = body.data.businessId || (isTenantUser(user) ? user.businessId : undefined);
+    if (restrictedAccessWithoutClient(user, scopedClientId)) {
       return reply.code(403).send(fail('CLIENT_SCOPE_REQUIRED', 'Este usuário não possui cliente associado.'));
     }
 
@@ -277,7 +286,8 @@ export async function registerOperationalRoutes(app: FastifyInstance) {
       where: {
         id: params.data.id,
         organizationId: user.organizationId!,
-        ...(restrictedClientId ? { clientId: restrictedClientId } : {}),
+        ...(scopedClientId ? { clientId: scopedClientId } : {}),
+        ...(scopedBusinessId ? { adAccount: { businessId: scopedBusinessId } } : {}),
       },
       include: { adAccount: { include: { connection: true } } },
     });

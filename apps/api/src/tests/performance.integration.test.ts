@@ -12,6 +12,7 @@ suite('Performance analytics by BM and period', () => {
   let app: FastifyInstance;
   let token = '';
   let clientId = '';
+  let otherAccountId = '';
 
   beforeAll(async () => {
     if (!adminPassword) throw new Error('SEED_ADMIN_PASSWORD é obrigatória para o teste de integração.');
@@ -58,6 +59,22 @@ suite('Performance analytics by BM and period', () => {
       },
     });
 
+    const otherAccount = await prisma.metaAdAccount.create({
+      data: {
+        organizationId: admin.organizationId,
+        clientId,
+        connectionId: connection.id,
+        accountId: '123456789002',
+        name: 'Conta Outra BM CI',
+        currency: 'BRL',
+        businessId: 'bm-other-ci',
+        businessName: 'BM Outra CI',
+        isActive: true,
+        isAssigned: true,
+      },
+    });
+    otherAccountId = otherAccount.id;
+
     const campaign = await prisma.campaign.create({
       data: {
         organizationId: admin.organizationId,
@@ -65,6 +82,18 @@ suite('Performance analytics by BM and period', () => {
         adAccountId: account.id,
         metaCampaignId: 'campaign-performance-ci',
         name: 'Campanha Performance CI',
+        objective: 'OUTCOME_LEADS',
+        status: 'ACTIVE',
+      },
+    });
+
+    await prisma.campaign.create({
+      data: {
+        organizationId: admin.organizationId,
+        clientId,
+        adAccountId: otherAccount.id,
+        metaCampaignId: 'campaign-other-bm-ci',
+        name: 'Campanha Outra BM CI',
         objective: 'OUTCOME_LEADS',
         status: 'ACTIVE',
       },
@@ -157,6 +186,23 @@ suite('Performance analytics by BM and period', () => {
           adSetId: 'adset-performance-ci',
           adId: 'ad-performance-ci',
         },
+        {
+          ...base,
+          adAccountId: otherAccount.id,
+          spend: 999,
+          impressions: 99999,
+          reach: 90000,
+          clicks: 999,
+          leads: 99,
+          conversations: 88,
+          purchases: 77,
+          revenue: 9999,
+          level: 'campaign',
+          date: new Date('2026-08-10T00:00:00.000Z'),
+          campaignId: 'campaign-other-bm-ci',
+          adSetId: '',
+          adId: '',
+        },
       ],
     });
   });
@@ -203,6 +249,23 @@ suite('Performance analytics by BM and period', () => {
     expect(ads.json().data[0].spend).toBe(60);
     expect(ads.json().data[0].leads).toBe(7);
     expect(ads.json().data[0].roas).toBeCloseTo(250 / 60, 5);
+  });
+
+  it('isola criação de campanha na BM selecionada e bloqueia conta de outra BM', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/campaigns',
+      headers: headers(),
+      payload: {
+        clientId,
+        businessId: 'bm-performance-ci',
+        adAccountId: otherAccountId,
+        name: 'Campanha que não pode cruzar BM',
+        objective: 'OUTCOME_LEADS',
+      },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('META_ACCOUNT_NOT_FOUND');
   });
 
   it('rejeita período invertido', async () => {
