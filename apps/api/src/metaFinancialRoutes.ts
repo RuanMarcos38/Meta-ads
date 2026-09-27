@@ -266,6 +266,10 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
         }
       }
 
+      if (capabilityErrors.length) {
+        req.log.warn({ accountId: rawAccountId, businessId, capabilityErrors }, 'Alguns recursos financeiros da Meta não ficaram disponíveis nesta consulta.');
+      }
+
       return ok({
         client: { id: client.id, name: client.name },
         account: {
@@ -283,52 +287,25 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           fundingSource: fundingSourceSummary(data?.funding_source_details),
           timezone: data?.timezone_name || account.timezone || null,
         },
-        metaFinancialCapabilities: {
-          apiVersion: env.meta.apiVersion,
-          connectionId: account.connection.id,
-          connectionStatus: account.connection.status,
-          tokenExpiresAt: account.connection.tokenExpiresAt || null,
-          oauthScopes: String(account.connection.scopes || '').split(',').map((item) => item.trim()).filter(Boolean),
+        paymentProfile: {
           businessId,
-          accountFinancialRead: true,
-          fundingSourceReadable: true,
-          creditCardsReadable,
-          extendedCreditsReadable,
-          paymentSourcesReadable: true,
+          currentFundingSource: fundingSourceSummary(data?.funding_source_details),
           businessCreditCards: businessCreditCards.map((item: any) => ({
             id: item?.id || null,
-            name: item?.name || item?.display_string || 'Forma de pagamento Meta',
+            name: item?.name || item?.display_string || 'Forma de pagamento',
             status: item?.status || null,
             displayString: item?.display_string || null,
             expiration: item?.expiration || null,
           })),
           extendedCredits: extendedCredits.map((item: any) => ({
             id: item?.id || null,
-            name: item?.name || item?.legal_entity_name || 'Linha de crédito Meta',
+            name: item?.name || item?.legal_entity_name || 'Linha de crédito',
             legalEntityName: item?.legal_entity_name || null,
             maxBalance: item?.max_balance || null,
             onlineMaxBalance: item?.online_max_balance || null,
             owned: Boolean(item?.is_owned_credit_line),
           })),
-          hasExtendedCredit: extendedCredits.length > 0,
-          capabilityErrors,
-          ready: account.connection.status === 'active'
-            && String(account.connection.scopes || '').includes('ads_management')
-            && String(account.connection.scopes || '').includes('business_management'),
         },
-        supportedInPlatform: {
-          readBalance: true,
-          readSpend: true,
-          readFundingSourceSummary: true,
-          readBillingActivity: true,
-          readBusinessCreditCards: creditCardsReadable,
-          readExtendedCredit: extendedCreditsReadable,
-          createMetaPixDirectly: false,
-          createMetaBoletoDirectly: false,
-          addMetaPaymentMethodDirectly: false,
-          addMetaFundsDirectly: false,
-        },
-        securityNotice: 'A integração usa o token Meta já conectado para consultar saldo, cobrança, fontes financeiras e linhas de crédito disponíveis. A API pública da Meta não expõe uma operação para gerar Pix/boleto de recarga nem cadastrar cartão arbitrariamente; a plataforma não simula essas operações para evitar cobrança sem crédito real na conta de anúncios.',
         updatedAt: new Date().toISOString(),
       });
     } catch (error: any) {
