@@ -116,7 +116,7 @@ export default function FinancialStatusBar() {
     setActivities([]);
     void load();
     if (!scope.clientId) return;
-    const timer = window.setInterval(() => { void load(true); }, 60_000);
+    const timer = window.setInterval(() => { void load(true); }, 300_000);
     return () => window.clearInterval(timer);
   }, [params.clientId, params.businessId, params.adAccountId]);
 
