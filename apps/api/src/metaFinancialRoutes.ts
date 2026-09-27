@@ -128,6 +128,7 @@ const BASE_FINANCIAL_FIELDS = [
   'spend_cap',
   'funding_source_details',
   'is_prepay_account',
+  'stored_balance_status',
   'timezone_name',
 ].join(',');
 
@@ -140,14 +141,21 @@ function isGraphRateLimit(error: any) {
 
 async function getFinancialAccountGraph(path: string, token: string) {
   const base = await getGraph(path, token, { fields: BASE_FINANCIAL_FIELDS });
-  if (!base?.is_prepay_account) return base;
+  const isPrepay = Boolean(base?.is_prepay_account)
+    || String(base?.stored_balance_status || '').toLowerCase() === 'prepay';
+  if (!isPrepay) return base;
 
+  // CurrencyAmount pode ser restrito por conta/permissão. Primeiro pedimos somente
+  // o subcampo essencial `amount`, que é suficiente para reproduzir os fundos
+  // disponíveis reais sem fazer uma expansão mais ampla invalidar a consulta.
   const currencyAmountFields = 'amount,amount_in_hundredths,currency,offsetted_amount';
   const optionalFieldSets = [
-    `stored_balance_status,total_prepay_balance.fields(${currencyAmountFields}),prepay_account_balance.fields(${currencyAmountFields})`,
+    'total_prepay_balance.fields(amount)',
+    'prepay_account_balance.fields(amount)',
+    'total_prepay_balance{amount}',
+    'prepay_account_balance{amount}',
     `total_prepay_balance.fields(${currencyAmountFields})`,
     `prepay_account_balance.fields(${currencyAmountFields})`,
-    'stored_balance_status,total_prepay_balance,prepay_account_balance',
     'total_prepay_balance',
     'prepay_account_balance',
   ];
@@ -157,15 +165,83 @@ async function getFinancialAccountGraph(path: string, token: string) {
     try {
       const extra = await getGraph(path, token, { fields });
       merged = { ...merged, ...extra };
-      if (extra?.total_prepay_balance != null || extra?.prepay_account_balance != null) {
-        return merged;
-      }
+      const liveCurrency = String(merged?.currency || 'BRL').toUpperCase();
+      const resolved = resolveDisplayedBalance(merged, liveCurrency);
+      if (resolved.value != null) return merged;
     } catch (error: any) {
       if (isGraphRateLimit(error)) break;
     }
   }
 
   return merged;
+}
+
+type FinancialConnectionCandidate = {
+  id: string;
+  status: string;
+  accessTokenEncrypted: string;
+};
+
+async function getFinancialAccountWithFallback(
+  path: string,
+  currencyHint: string,
+  primaryConnection: FinancialConnectionCandidate,
+  organizationId: string,
+  clientId: string,
+) {
+  const alternatives = await prisma.metaConnection.findMany({
+    where: {
+      organizationId,
+      status: 'active',
+      OR: [
+        { clientId },
+        { clientId: null },
+      ],
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: 6,
+    select: {
+      id: true,
+      status: true,
+      accessTokenEncrypted: true,
+    },
+  });
+
+  const candidates = [primaryConnection, ...alternatives]
+    .filter((connection, index, all) =>
+      connection.status === 'active'
+      && all.findIndex((item) => item.id === connection.id) === index);
+
+  let firstSuccessful: { data: any; token: string; connectionId: string } | null = null;
+  let lastError: any = null;
+
+  for (const connection of candidates) {
+    try {
+      const token = decrypt(connection.accessTokenEncrypted);
+      const data = await getFinancialAccountGraph(path, token);
+      const currency = String(data?.currency || currencyHint || 'BRL').toUpperCase();
+      const displayedBalance = resolveDisplayedBalance(data, currency);
+      const isPrepay = Boolean(data?.is_prepay_account)
+        || String(data?.stored_balance_status || '').toLowerCase() === 'prepay';
+
+      if (!firstSuccessful) {
+        firstSuccessful = { data, token, connectionId: connection.id };
+      }
+
+      // Para pós-pago, a primeira resposta válida já é suficiente. Para pré-pago,
+      // continuamos tentando somente conexões já autorizadas da mesma organização
+      // até encontrar um CurrencyAmount real retornado pela Meta.
+      if (!isPrepay || displayedBalance.value != null) {
+        return { data, token, connectionId: connection.id };
+      }
+    } catch (error: any) {
+      lastError = error;
+      if (isGraphRateLimit(error)) break;
+    }
+  }
+
+  if (firstSuccessful) return firstSuccessful;
+  throw lastError || new Error('Nenhuma conexão Meta ativa conseguiu consultar a conta de anúncios.');
 }
 
 async function getPagedGraph(path: string, token: string, params: Record<string, unknown>) {
@@ -238,23 +314,17 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
 
     const rows = await Promise.all(accounts.map(async (account) => {
       const currency = String(account.currency || 'BRL').toUpperCase();
-      if (account.connection.status !== 'active') {
-        return {
-          id: account.id,
-          accountId: account.accountId,
-          name: account.name || `Conta ${account.accountId}`,
-          businessId: account.businessId,
-          businessName: account.businessName,
-          currency,
-          available: false,
-          error: 'Conexão Meta inativa.',
-        };
-      }
 
       try {
-        const token = decrypt(account.connection.accessTokenEncrypted);
         const actId = String(account.accountId).startsWith('act_') ? String(account.accountId) : `act_${account.accountId}`;
-        const data = await getFinancialAccountGraph(actId, token);
+        const financial = await getFinancialAccountWithFallback(
+          actId,
+          currency,
+          account.connection,
+          user.organizationId!,
+          client.id,
+        );
+        const data = financial.data;
         const liveCurrency = String(data?.currency || currency).toUpperCase();
         const displayedBalance = resolveDisplayedBalance(data, liveCurrency);
         return {
@@ -331,12 +401,18 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
       include: { connection: true },
     });
     if (!account) return reply.code(404).send(fail('META_ACCOUNT_NOT_ASSIGNED', 'A conta Meta selecionada não pertence ao perfil deste usuário.'));
-    if (account.connection.status !== 'active') return reply.code(409).send(fail('META_CONNECTION_REQUIRED', 'A conexão Meta desta conta está inativa.'));
 
     try {
-      const token = decrypt(account.connection.accessTokenEncrypted);
       const actId = String(account.accountId).startsWith('act_') ? String(account.accountId) : `act_${account.accountId}`;
-      const data = await getFinancialAccountGraph(actId, token);
+      const financial = await getFinancialAccountWithFallback(
+        actId,
+        String(account.currency || 'BRL').toUpperCase(),
+        account.connection,
+        user.organizationId!,
+        client.id,
+      );
+      const token = financial.token;
+      const data = financial.data;
       const currency = String(data?.currency || account.currency || 'BRL').toUpperCase();
       const displayedBalance = resolveDisplayedBalance(data, currency);
       const rawAccountId = String(data?.account_id || account.accountId).replace(/^act_/, '');
