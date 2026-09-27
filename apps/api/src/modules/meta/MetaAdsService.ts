@@ -357,6 +357,27 @@ export class MetaAdsService {
     return postForm<{ success?: boolean }>(`${BASE()}/${campaignId}`, this.accessToken, { status });
   }
 
+  async creativeDetails(creativeId: string) {
+    const fields = [
+      'id',
+      'name',
+      'title',
+      'body',
+      'image_url',
+      'thumbnail_url',
+      'object_story_spec',
+      'asset_feed_spec',
+    ].join(',');
+    const response = await withRetry(() => axios.get(`${BASE()}/${creativeId}`, {
+      params: {
+        access_token: this.accessToken,
+        fields,
+      },
+      timeout: 20_000,
+    }));
+    return response.data;
+  }
+
   async insights(actId: string, since: string, until: string, level: MetaInsightLevel = 'campaign') {
     const hierarchyFields = level === 'ad'
       ? 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name'
