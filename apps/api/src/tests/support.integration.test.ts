@@ -18,6 +18,7 @@ suite('internal support flow', () => {
   let sameCompanyTokenB = '';
   let otherCompanyUserId = '';
   let sameCompanyUserBId = '';
+  let adminUserId = '';
 
   beforeAll(async () => {
     if (!adminPassword) throw new Error('SEED_ADMIN_PASSWORD é obrigatória para o teste de suporte.');
@@ -33,6 +34,7 @@ suite('internal support flow', () => {
 
     const admin = await prisma.user.findUnique({ where: { email: adminEmail } });
     if (!admin?.organizationId) throw new Error('Administrador sem organização no teste.');
+    adminUserId = admin.id;
 
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const companyA = await prisma.client.create({ data: { organizationId: admin.organizationId, name: `Empresa A ${suffix}` } });
@@ -69,14 +71,16 @@ suite('internal support flow', () => {
     if (app) await app.close();
   });
 
-  it('registra presença online e lista a equipe ativa', async () => {
+  it('registra status online/ausente e administrador visualiza clientes', async () => {
     const heartbeat = await app.inject({
       method: 'POST',
       url: '/support/presence',
       headers: { authorization: `Bearer ${token}` },
+      payload: { status: 'ONLINE' },
     });
     expect(heartbeat.statusCode).toBe(200);
     expect(heartbeat.json().data.online).toBe(true);
+    expect(heartbeat.json().data.status).toBe('ONLINE');
 
     const presence = await app.inject({
       method: 'GET',
@@ -85,6 +89,16 @@ suite('internal support flow', () => {
     });
     expect(presence.statusCode).toBe(200);
     expect(presence.json().data.some((item: { email: string }) => item.email === adminEmail)).toBe(true);
+    expect(presence.json().data.some((item: { id: string }) => item.id === sameCompanyUserBId)).toBe(true);
+
+    const away = await app.inject({
+      method: 'POST',
+      url: '/support/presence',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { status: 'AWAY' },
+    });
+    expect(away.statusCode).toBe(200);
+    expect(away.json().data.status).toBe('AWAY');
   });
 
   it('mostra usuários da mesma empresa e bloqueia outra empresa', async () => {
@@ -96,6 +110,7 @@ suite('internal support flow', () => {
     expect(presence.statusCode).toBe(200);
     const visibleIds = presence.json().data.map((item: { id: string }) => item.id);
     expect(visibleIds).toContain(sameCompanyUserBId);
+    expect(visibleIds).toContain(adminUserId);
     expect(visibleIds).not.toContain(otherCompanyUserId);
 
     const sameCompanyChat = await app.inject({
