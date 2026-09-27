@@ -206,6 +206,74 @@ suite('API integration flow', () => {
     expect(blocked.statusCode).toBe(403);
   });
 
+  it('permite ao cliente acessar somente as múltiplas BMs cadastradas na própria empresa', async () => {
+    const admin = await prisma.user.findUnique({ where: { email: adminEmail }, select: { organizationId: true } });
+    expect(admin?.organizationId).toBeTruthy();
+    const organizationId = admin!.organizationId!;
+
+    const client = await prisma.client.create({ data: { organizationId, name: 'Cliente Multi BM CI' } });
+    const foreignClient = await prisma.client.create({ data: { organizationId, name: 'Cliente BM Estranha CI' } });
+
+    await prisma.businessManager.createMany({
+      data: [
+        { organizationId, clientId: client.id, metaBusinessId: 'bm-client-primary-ci', name: 'BM Primária CI', status: 'active' },
+        { organizationId, clientId: client.id, metaBusinessId: 'bm-client-secondary-ci', name: 'BM Secundária CI', status: 'active' },
+        { organizationId, clientId: foreignClient.id, metaBusinessId: 'bm-client-foreign-ci', name: 'BM Estranha CI', status: 'active' },
+      ],
+    });
+
+    const email = 'cliente-multibm-ci@example.com';
+    const password = 'ClienteMultiBM#2026!';
+    const created = await app.inject({
+      method: 'POST',
+      url: '/workspace/users',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Cliente Multi BM CI',
+        email,
+        password,
+        role: 'CLIENT',
+        clientId: client.id,
+        businessId: 'bm-client-primary-ci',
+      },
+    });
+    expect(created.statusCode).toBe(200);
+
+    await prisma.user.update({ where: { email }, data: { mustChangePassword: false } });
+    const login = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email, password },
+    });
+    expect(login.statusCode).toBe(200);
+    const clientToken = login.json().data.token as string;
+
+    const context = await app.inject({
+      method: 'GET',
+      url: '/workspace/context',
+      headers: { authorization: `Bearer ${clientToken}` },
+    });
+    expect(context.statusCode).toBe(200);
+    expect(context.json().data.tenantLocked).toBe(true);
+    expect(context.json().data.clients).toHaveLength(1);
+    expect(context.json().data.businesses.map((item: { metaBusinessId: string }) => item.metaBusinessId))
+      .toEqual(expect.arrayContaining(['bm-client-primary-ci', 'bm-client-secondary-ci']));
+
+    const allowedSecondary = await app.inject({
+      method: 'GET',
+      url: `/performance/summary?clientId=${client.id}&businessId=bm-client-secondary-ci`,
+      headers: { authorization: `Bearer ${clientToken}` },
+    });
+    expect(allowedSecondary.statusCode).toBe(200);
+
+    const blockedForeign = await app.inject({
+      method: 'GET',
+      url: `/performance/summary?clientId=${client.id}&businessId=bm-client-foreign-ci`,
+      headers: { authorization: `Bearer ${clientToken}` },
+    });
+    expect(blockedForeign.statusCode).toBe(403);
+  });
+
   it('carrega dashboard, campanhas e executa sincronização em modo de teste', async () => {
     for (const url of ['/dashboard/summary', '/dashboard/daily', '/dashboard/campaigns']) {
       const response = await app.inject({

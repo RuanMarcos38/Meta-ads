@@ -9,6 +9,7 @@ const scopedPrefixes = [
   '/workspace',
   '/campaigns',
   '/meta/status',
+  '/meta/live',
 ];
 
 function isObject(value: unknown): value is Record<string, any> {
@@ -60,9 +61,6 @@ export async function registerTenantIsolation(app: FastifyInstance) {
     user.clientIds = allowedClients;
 
     const multiClient = allowedClients.length > 1;
-    if (!multiClient && !current.businessId) {
-      return reply.code(403).send(fail('BUSINESS_SCOPE_REQUIRED', 'Este usuário precisa estar vinculado a uma Business Manager.'));
-    }
 
     const requestedQueryClient = isObject(req.query) ? req.query.clientId : undefined;
     const requestedBodyClient = isObject(req.body) ? req.body.clientId : undefined;
@@ -74,63 +72,29 @@ export async function registerTenantIsolation(app: FastifyInstance) {
 
     const requestedQueryBusiness = isObject(req.query) ? req.query.businessId : undefined;
     const requestedBodyBusiness = isObject(req.body) ? req.body.businessId : undefined;
-    const requestedBusiness = requestedQueryBusiness || requestedBodyBusiness;
-
-    if (!multiClient) {
-      if (requestedBusiness && requestedBusiness !== current.businessId) {
-        return reply.code(403).send(fail('FORBIDDEN', 'Business Manager fora do escopo deste usuário.'));
-      }
-      if (isObject(req.query)) {
-        req.query.clientId = current.clientId;
-        req.query.businessId = current.businessId;
-      }
-      if (isObject(req.body)) {
-        req.body.clientId = current.clientId;
-        req.body.businessId = current.businessId;
-      }
-      return;
-    }
+    const requestedBusiness = requestedQueryBusiness || requestedBodyBusiness
+      || (!multiClient && selectedClient === current.clientId ? current.businessId : undefined);
 
     if (requestedBusiness) {
       const validBusiness = await validateBusiness(current.organizationId, selectedClient, String(requestedBusiness));
-      if (!validBusiness) return reply.code(403).send(fail('FORBIDDEN', 'Business Manager fora da empresa selecionada ou não autorizada.'));
+      if (!validBusiness) {
+        return reply.code(403).send(fail('FORBIDDEN', 'Business Manager fora da empresa selecionada ou não autorizada.'));
+      }
     }
 
     if (isObject(req.query)) {
       req.query.clientId = selectedClient;
-      if (!requestedQueryBusiness) delete req.query.businessId;
+      if (requestedBusiness) req.query.businessId = String(requestedBusiness);
+      else delete req.query.businessId;
     }
     if (isObject(req.body)) {
       req.body.clientId = selectedClient;
-      if (!requestedBodyBusiness) delete req.body.businessId;
+      if (requestedBusiness) req.body.businessId = String(requestedBusiness);
+      else delete req.body.businessId;
     }
   });
 
-  app.addHook('onSend', async (req, _reply, payload) => {
-    if (!req.url.startsWith('/dashboard/context') && !req.url.startsWith('/meta/status')) return payload;
-    const user = req.user as AuthUser | undefined;
-    if (!user || (user.role !== 'CLIENT' && user.role !== 'MANAGER') || !user.businessId) return payload;
-
-    // Usuário multiempresa já foi validado no preHandler por empresa/BM solicitada.
-    // O filtro legado abaixo continua exclusivamente para usuários de empresa única.
-    if (Array.isArray(user.clientIds) && user.clientIds.length > 1) return payload;
-
-    try {
-      const parsed = JSON.parse(Buffer.isBuffer(payload) ? payload.toString('utf8') : String(payload));
-      if (!parsed?.success || !parsed?.data) return payload;
-
-      if (req.url.startsWith('/dashboard/context')) {
-        if (Array.isArray(parsed.data.accounts)) parsed.data.accounts = parsed.data.accounts.filter((item: any) => item.businessId === user.businessId);
-        if (Array.isArray(parsed.data.businesses)) parsed.data.businesses = parsed.data.businesses.filter((item: any) => item.id === user.businessId);
-      }
-
-      if (req.url.startsWith('/meta/status')) {
-        if (Array.isArray(parsed.data.accounts)) parsed.data.accounts = parsed.data.accounts.filter((item: any) => item.businessId === user.businessId);
-      }
-
-      return JSON.stringify(parsed);
-    } catch {
-      return payload;
-    }
-  });
+  // O preHandler já restringe empresa e BM pelo vínculo ativo BusinessManager -> Client.
+  // Não filtramos a resposta para apenas a BM principal, pois um mesmo cliente pode
+  // possuir várias BMs explicitamente cadastradas no seu perfil.
 }
