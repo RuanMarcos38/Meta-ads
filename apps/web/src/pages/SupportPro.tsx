@@ -68,7 +68,7 @@ export default function SupportPro(){
  const savedPresence=(localStorage.getItem('supportPresenceStatus')||'ONLINE') as PresenceStatus;
  const[ownStatus,setOwnStatus]=useState<Exclude<PresenceStatus,'OFFLINE'>>(presenceOptions.some(s=>s.value===savedPresence)?savedPresence as Exclude<PresenceStatus,'OFFLINE'>:'ONLINE');
  const[selectedId,setSelectedId]=useState('');
- const[filter,setFilter]=useState<'ALL'|'CHAT'|'TICKET'>('ALL');
+ const[filter,setFilter]=useState<'ALL'|'CHAT'|'TICKET'|'CONTACTS'>('ALL');
  const[search,setSearch]=useState('');
  const[messageSearch,setMessageSearch]=useState('');
  const[showMessageSearch,setShowMessageSearch]=useState(false);
@@ -151,13 +151,12 @@ export default function SupportPro(){
 
  useEffect(()=>{bottom.current?.scrollIntoView({behavior:'smooth'});},[msgs.length]);
 
- const visible=useMemo(()=>convs.filter(c=>(filter==='ALL'||c.type===filter)&&(!search.trim()||[c.subject,c.peer?.name,c.peer?.email,c.requester?.name,c.requester?.email,c.lastMessage?.body].some(v=>String(v||'').toLowerCase().includes(search.toLowerCase())))),[convs,filter,search]);
+ const visible=useMemo(()=>convs.filter(c=>(filter==='ALL'||(filter!=='CONTACTS'&&c.type===filter))&&(!search.trim()||[c.subject,c.peer?.name,c.peer?.email,c.requester?.name,c.requester?.email,c.lastMessage?.body].some(v=>String(v||'').toLowerCase().includes(search.toLowerCase())))),[convs,filter,search]);
+ const visibleContacts=useMemo(()=>availablePeople.filter(p=>!search.trim()||[p.name,p.email,p.clientName,roleLabel(p.role)].some(v=>String(v||'').toLowerCase().includes(search.toLowerCase()))),[availablePeople,search]);
  const visibleMessages=useMemo(()=>!messageSearch.trim()?msgs:msgs.filter(m=>[m.body,m.attachmentName,m.sender?.name].some(v=>String(v||'').toLowerCase().includes(messageSearch.toLowerCase()))),[msgs,messageSearch]);
  const availablePeople=useMemo(()=>people.filter(p=>p.id!==user?.id),[people,user?.id]);
  const presenceById=useMemo(()=>new Map(people.map(p=>[p.id,p.presenceStatus||'OFFLINE'] as const)),[people]);
  const selectedPresence=(selected?.peer?.id?presenceById.get(selected.peer.id):'OFFLINE') as PresenceStatus;
- const activeCount=people.filter(p=>presenceMeta(p.presenceStatus).active).length;
- const unavailableCount=people.filter(p=>!presenceMeta(p.presenceStatus).active).length;
 
  async function openDirect(person:Person){
   if(person.id===user?.id)return;
@@ -257,12 +256,12 @@ export default function SupportPro(){
 
  const selectedMeta=presenceMeta(selectedPresence);
 
- return <div className="space-y-3">
-  {error&&<div className="message-warning">{error}</div>}
+ return <div className="h-full min-h-0">
+  {error&&<div className="message-warning m-2">{error}</div>}
 
-  <section className="overflow-hidden rounded-[10px] border border-[#d8dedb] bg-white shadow-sm">
-   <div className="grid min-h-[720px] lg:grid-cols-[360px_minmax(0,1fr)]">
-    <aside className={`${selected?'hidden lg:flex':'flex'} min-h-[720px] flex-col border-r border-[#d8dedb] bg-white`}>
+  <section className="h-full min-h-0 overflow-hidden bg-white">
+   <div className="grid h-full min-h-[680px] lg:min-h-0 lg:grid-cols-[360px_minmax(0,1fr)]">
+    <aside className={`${selected?'hidden lg:flex':'flex'} h-full min-h-0 flex-col border-r border-[#d8dedb] bg-white`}>
      <div className="flex h-[62px] items-center justify-between bg-[#f0f2f5] px-4">
       <div className="flex min-w-0 items-center gap-3">
        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#d9fdd3] text-[11px] font-bold text-[#176b50]">{initials(user?.name)}</div>
@@ -285,23 +284,32 @@ export default function SupportPro(){
      </div>
 
      <div className="premium-scrollbar flex-1 overflow-y-auto">
-      {visible.map(c=>{
-       const peerStatus=(c.peer?.id?presenceById.get(c.peer.id):'OFFLINE') as PresenceStatus;
-       const meta=presenceMeta(peerStatus);
-       const peerName=c.type==='CHAT'?(c.peer?.name||c.subject||'Atendimento'):c.subject||'Chamado';
-       return <button key={c.id} onClick={()=>setSelectedId(c.id)} className={`flex w-full items-center gap-3 border-b border-[#f0f2f5] px-3 py-2.5 text-left transition ${selectedId===c.id?'bg-[#f0f2f5]':'hover:bg-[#f5f6f6]'}`}>
-        <div className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#dfe5e7] text-[12px] font-semibold text-[#3b4a54]">
-         {initials(peerName)}
-         {c.type==='CHAT'&&<span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white ${meta.dot}`}/>}
-        </div>
-        <div className="min-w-0 flex-1">
-         <div className="flex items-center justify-between gap-2"><strong className="truncate text-[12px] font-medium text-[#111b21]">{peerName}</strong><span className={`shrink-0 text-[8px] ${c.unread?'font-semibold text-[#00a884]':'text-[#667781]'}`}>{time(c.lastMessageAt)}</span></div>
-         <div className="mt-0.5 flex items-center gap-1.5"><p className="min-w-0 flex-1 truncate text-[9px] text-[#667781]">{c.lastMessage?.attachmentName?'📎 '+c.lastMessage.attachmentName:c.lastMessage?.body||c.peer?.email||'Conversa iniciada'}</p>{c.unread&&<span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#25d366] px-1 text-[8px] font-bold text-white">1</span>}</div>
-         <div className="mt-1 flex items-center gap-1">{c.type==='CHAT'&&<span className={`text-[8px] font-medium ${meta.text}`}>{meta.label}</span>}{c.aiEnabled&&<span className="text-[8px] text-[#008069]">· IA ativa</span>}{c.humanHandoffAt&&<span className="text-[8px] text-amber-700">· Gestor solicitado</span>}</div>
-        </div>
-       </button>
-      })}
-      {!visible.length&&<div className="grid h-48 place-items-center px-6 text-center text-[10px] text-[#667781]">Nenhuma conversa encontrada.</div>}
+      {filter==='CONTACTS'?<>
+       <div className="border-b border-[#e9edef] px-4 py-2"><p className="text-[9px] font-semibold uppercase tracking-wide text-[#008069]">Contatos internos</p><p className="mt-0.5 text-[8px] text-[#667781]">{admin?'Clientes e equipe autorizados na plataforma':'Administradores e usuários autorizados da sua empresa'}</p></div>
+       {visibleContacts.map(p=>{const meta=presenceMeta(p.presenceStatus);return <button key={p.id} onClick={()=>{void openDirect(p);setFilter('ALL');}} className="flex w-full items-center gap-3 border-b border-[#f0f2f5] px-3 py-3 text-left transition hover:bg-[#f5f6f6]">
+        <div className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#dfe5e7] text-[12px] font-semibold text-[#3b4a54]">{initials(p.name)}<span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white ${meta.dot}`}/></div>
+        <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><strong className="truncate text-[12px] font-medium text-[#111b21]">{p.name}</strong><span className={`shrink-0 text-[8px] font-medium ${meta.text}`}>{meta.label}</span></div><p className="mt-0.5 truncate text-[9px] text-[#667781]">{roleLabel(p.role)}{p.clientName?` · ${p.clientName}`:''}</p><p className="mt-0.5 truncate text-[8px] text-[#8696a0]">{p.email}</p></div>
+       </button>})}
+       {!visibleContacts.length&&<div className="grid h-48 place-items-center px-6 text-center text-[10px] text-[#667781]">Nenhum contato interno encontrado.</div>}
+      </>:<>
+       {visible.map(c=>{
+        const peerStatus=(c.peer?.id?presenceById.get(c.peer.id):'OFFLINE') as PresenceStatus;
+        const meta=presenceMeta(peerStatus);
+        const peerName=c.type==='CHAT'?(c.peer?.name||c.subject||'Atendimento'):c.subject||'Chamado';
+        return <button key={c.id} onClick={()=>setSelectedId(c.id)} className={`flex w-full items-center gap-3 border-b border-[#f0f2f5] px-3 py-2.5 text-left transition ${selectedId===c.id?'bg-[#f0f2f5]':'hover:bg-[#f5f6f6]'}`}>
+         <div className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#dfe5e7] text-[12px] font-semibold text-[#3b4a54]">
+          {initials(peerName)}
+          {c.type==='CHAT'&&<span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white ${meta.dot}`}/>}
+         </div>
+         <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2"><strong className="truncate text-[12px] font-medium text-[#111b21]">{peerName}</strong><span className={`shrink-0 text-[8px] ${c.unread?'font-semibold text-[#00a884]':'text-[#667781]'}`}>{time(c.lastMessageAt)}</span></div>
+          <div className="mt-0.5 flex items-center gap-1.5"><p className="min-w-0 flex-1 truncate text-[9px] text-[#667781]">{c.lastMessage?.attachmentName?'📎 '+c.lastMessage.attachmentName:c.lastMessage?.body||c.peer?.email||'Conversa iniciada'}</p>{c.unread&&<span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#25d366] px-1 text-[8px] font-bold text-white">1</span>}</div>
+          <div className="mt-1 flex items-center gap-1">{c.type==='CHAT'&&<span className={`text-[8px] font-medium ${meta.text}`}>{meta.label}</span>}{c.aiEnabled&&<span className="text-[8px] text-[#008069]">· IA ativa</span>}{c.humanHandoffAt&&<span className="text-[8px] text-amber-700">· Gestor solicitado</span>}</div>
+         </div>
+        </button>
+       })}
+       {!visible.length&&<div className="grid h-48 place-items-center px-6 text-center text-[10px] text-[#667781]">Nenhuma conversa encontrada.</div>}
+      </>}
      </div>
 
      <div className="border-t border-[#e9edef] bg-[#f7f8f8] p-3">
@@ -375,14 +383,6 @@ export default function SupportPro(){
      </>:<div className="flex flex-1 flex-col items-center justify-center bg-[#f8f9fa] px-6 text-center"><div className="grid h-16 w-16 place-items-center rounded-full bg-[#d9fdd3] text-[#008069]"><MessageCircle size={30}/></div><h2 className="mt-4 text-[18px] font-light text-[#41525d]">Atendimento Gestão Ads</h2><p className="mt-2 max-w-md text-[10px] leading-5 text-[#667781]">Selecione uma conversa para responder clientes, enviar arquivos, emojis, áudio e acompanhar o atendimento em tempo real.</p><span className={`mt-4 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[8px] ${aiConfigured?'border-emerald-200 bg-emerald-50 text-emerald-700':'border-amber-200 bg-amber-50 text-amber-700'}`}><Bot size={10}/>{aiConfigured?'Assistente IA disponível':'IA aguardando configuração'}</span></div>}
     </main>
    </div>
-  </section>
-
-  <section className="corporate-card p-4">
-   <div className="flex flex-wrap items-center justify-between gap-2">
-    <div><h2 className="panel-title">Equipe de atendimento</h2><p className="panel-subtitle">{admin?'Visualize clientes e equipe, com status operacional em tempo real.':'Visualize administradores e usuários autorizados da sua empresa.'}</p></div>
-    <div className="flex gap-2"><span className="status-chip status-success"><Circle size={8} fill="currentColor"/>{activeCount} ativos</span><span className="status-chip status-neutral"><Circle size={8} fill="currentColor"/>{unavailableCount} indisponíveis</span></div>
-   </div>
-   <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{people.map(p=>{const self=p.id===user?.id;const meta=presenceMeta(p.presenceStatus);return <div key={p.id} className="flex items-center justify-between gap-3 rounded-[8px] border border-[#e1e6e3] bg-white p-3"><div className="flex min-w-0 items-center gap-3"><div className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#dfe5e7] text-[10px] font-semibold text-[#3b4a54]">{initials(p.name)}<span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white ${meta.dot}`}/></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="truncate text-[10px]">{p.name}{self?' (você)':''}</strong><span className={`rounded-full border px-2 py-0.5 text-[8px] ${meta.chip}`}>{meta.label}</span></div><p className="mt-1 truncate text-[8px] text-slate-500">{roleLabel(p.role)}{p.clientName?` · ${p.clientName}`:''}</p></div></div>{!self&&<button className="secondary-button shrink-0" disabled={sending} onClick={()=>{void openDirect(p);}}><MessageCircle size={12}/>Conversar</button>}</div>})}{!people.length&&<div className="col-span-full text-[10px] text-slate-400">Nenhum usuário disponível.</div>}</div>
   </section>
 
   {showNew&&<div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4"><form onSubmit={create} className="w-full max-w-lg rounded-[12px] bg-white p-5 shadow-2xl"><div className="flex items-center justify-between"><h2 className="text-[15px] font-semibold text-[#111b21]">Nova conversa</h2><button type="button" className="grid h-8 w-8 place-items-center rounded-full hover:bg-[#f0f2f5]" onClick={()=>setShowNew(false)}><X size={16}/></button></div><div className="mt-4 grid gap-3"><label className="field-label">Tipo<select className="field-control" value={newType} onChange={e=>{setNewType(e.target.value as any);setNewRecipientId('');}}><option value="CHAT">Conversa</option><option value="TICKET">Chamado</option></select></label>{newType==='CHAT'&&<label className="field-label">Conversar com<select className="field-control" value={newRecipientId} onChange={e=>setNewRecipientId(e.target.value)}><option value="">Atendimento / administrador</option>{availablePeople.map(p=>{const meta=presenceMeta(p.presenceStatus);return <option key={p.id} value={p.id}>{p.name} — {meta.label} — {roleLabel(p.role)}{p.clientName?` · ${p.clientName}`:''}</option>})}</select></label>}{newType==='TICKET'&&<><label className="field-label">Assunto<input className="field-control" value={newSubject} onChange={e=>setNewSubject(e.target.value)} minLength={3} required/></label><label className="field-label">Prioridade<select className="field-control" value={newPriority} onChange={e=>setNewPriority(e.target.value)}><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></label></>}<label className="field-label">Mensagem<textarea className="field-control" value={newMessage} onChange={e=>setNewMessage(e.target.value)} required={newType==='TICKET'||!newRecipientId} placeholder={newType==='CHAT'&&newRecipientId?'Opcional — você pode escrever depois de abrir a conversa.':'Digite a mensagem inicial'}/></label></div><div className="mt-4 flex justify-end gap-2"><button type="button" className="secondary-button" onClick={()=>setShowNew(false)}>Cancelar</button><button className="primary-button" disabled={sending}><Plus size={13}/>{sending?'Criando':'Iniciar'}</button></div></form></div>}
