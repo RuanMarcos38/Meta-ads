@@ -91,6 +91,25 @@ suite('internal support flow', () => {
     expect(presence.json().data.some((item: { email: string }) => item.email === adminEmail)).toBe(true);
     expect(presence.json().data.some((item: { id: string }) => item.id === sameCompanyUserBId)).toBe(true);
 
+    const working = await app.inject({
+      method: 'POST',
+      url: '/support/presence',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { status: 'WORKING' },
+    });
+    expect(working.statusCode).toBe(200);
+    expect(working.json().data.status).toBe('WORKING');
+    expect(working.json().data.online).toBe(true);
+
+    const busy = await app.inject({
+      method: 'POST',
+      url: '/support/presence',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { status: 'BUSY' },
+    });
+    expect(busy.statusCode).toBe(200);
+    expect(busy.json().data.status).toBe('BUSY');
+
     const away = await app.inject({
       method: 'POST',
       url: '/support/presence',
