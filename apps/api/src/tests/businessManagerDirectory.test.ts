@@ -21,6 +21,17 @@ const candidate = (overrides: Partial<{
 });
 
 describe('Business Manager directory connection resolution', () => {
+  it('prioriza a conexão Meta global da ferramenta mesmo quando existe conexão legada da empresa', () => {
+    const result = chooseDirectoryConnection('client-target', [
+      candidate({ id: 'legacy-client', clientId: 'client-target', updatedAt: new Date('2026-09-01T10:00:00.000Z') }),
+      candidate({ id: 'global', clientId: null, updatedAt: new Date('2026-08-31T10:00:00.000Z') }),
+    ]);
+
+    expect(result.connection?.id).toBe('global');
+    expect(result.source).toBe('organization');
+    expect(result.sourceClientId).toBeNull();
+  });
+
   it('prioriza a conexão Meta específica da empresa', () => {
     const result = chooseDirectoryConnection('client-target', [
       candidate({ id: 'shared', clientId: 'client-a', updatedAt: new Date('2026-08-31T13:00:00.000Z') }),
