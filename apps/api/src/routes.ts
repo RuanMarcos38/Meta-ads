@@ -385,30 +385,6 @@ export async function registerRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get('/meta/oauth/start-management', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
-    if (!metaConfigurationReady()) return metaConfigFailure(reply);
-
-    const u = req.user as AuthUser;
-    const state = app.jwt.sign({
-      type: 'meta_management_oauth',
-      userId: u.id,
-      organizationId: u.organizationId,
-    }, { expiresIn: '10m' });
-
-    const authUrl = new URL(`https://www.facebook.com/${env.meta.apiVersion}/dialog/oauth`);
-    authUrl.searchParams.set('client_id', env.meta.appId);
-    authUrl.searchParams.set('redirect_uri', env.meta.redirectUri);
-    authUrl.searchParams.set('state', state);
-    authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('scope', META_OAUTH_SCOPES.join(','));
-
-    return ok({
-      authUrl: authUrl.toString(),
-      scopes: META_OAUTH_SCOPES,
-      mode: 'organization',
-    });
-  });
-
   app.get('/meta/oauth/start', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
     if (!metaConfigurationReady()) return metaConfigFailure(reply);
 
