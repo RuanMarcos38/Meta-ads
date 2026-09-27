@@ -82,16 +82,6 @@ async function getPagedGraph(path: string, token: string, params: Record<string,
   return rows;
 }
 
-function billingUrl(accountId: string, businessId?: string | null, tab = 'account_billing_settings') {
-  const params = new URLSearchParams({
-    act: String(accountId).replace(/^act_/, ''),
-    page: 'account_settings',
-    tab,
-  });
-  if (businessId) params.set('business_id', businessId);
-  return `https://www.facebook.com/ads/manager/account_settings/account_billing/?${params.toString()}`;
-}
-
 function fundingSourceSummary(value: any) {
   if (!value || typeof value !== 'object') return null;
   return {
@@ -250,6 +240,28 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
       const rawAccountId = String(data?.account_id || account.accountId).replace(/^act_/, '');
       const businessId = account.businessId || query.data.businessId || null;
 
+      let businessCreditCards: any[] = [];
+      let extendedCredits: any[] = [];
+      const capabilityErrors: string[] = [];
+      if (businessId) {
+        try {
+          businessCreditCards = await getPagedGraph(`${businessId}/creditcards`, token, {
+            fields: 'id,name,status,display_string,expiration',
+            limit: '100',
+          });
+        } catch (error: any) {
+          capabilityErrors.push(`creditcards: ${graphError(error)}`);
+        }
+        try {
+          extendedCredits = await getPagedGraph(`${businessId}/extendedcredits`, token, {
+            fields: 'id,legal_entity_name,max_balance,online_max_balance,is_owned_credit_line,owner_business,name',
+            limit: '100',
+          });
+        } catch (error: any) {
+          capabilityErrors.push(`extendedcredits: ${graphError(error)}`);
+        }
+      }
+
       return ok({
         client: { id: client.id, name: client.name },
         account: {
@@ -267,21 +279,40 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           fundingSource: fundingSourceSummary(data?.funding_source_details),
           timezone: data?.timezone_name || account.timezone || null,
         },
-        actions: {
-          addFundsUrl: billingUrl(rawAccountId, businessId, 'account_billing_settings'),
-          paymentMethodsUrl: billingUrl(rawAccountId, businessId, 'account_billing_settings'),
-          paymentActivityUrl: billingUrl(rawAccountId, businessId, 'account_billing_activity'),
-          receiptsUrl: billingUrl(rawAccountId, businessId, 'account_billing_activity'),
+        metaFinancialCapabilities: {
+          businessId,
+          paymentSourcesReadable: true,
+          businessCreditCards: businessCreditCards.map((item: any) => ({
+            id: item?.id || null,
+            name: item?.name || item?.display_string || 'Forma de pagamento Meta',
+            status: item?.status || null,
+            displayString: item?.display_string || null,
+            expiration: item?.expiration || null,
+          })),
+          extendedCredits: extendedCredits.map((item: any) => ({
+            id: item?.id || null,
+            name: item?.name || item?.legal_entity_name || 'Linha de crédito Meta',
+            legalEntityName: item?.legal_entity_name || null,
+            maxBalance: item?.max_balance || null,
+            onlineMaxBalance: item?.online_max_balance || null,
+            owned: Boolean(item?.is_owned_credit_line),
+          })),
+          hasExtendedCredit: extendedCredits.length > 0,
+          capabilityErrors,
         },
         supportedInPlatform: {
           readBalance: true,
           readSpend: true,
           readFundingSourceSummary: true,
           readBillingActivity: true,
-          addPaymentMethodDirectly: false,
-          addFundsDirectly: false,
+          readBusinessCreditCards: businessCreditCards.length > 0,
+          readExtendedCredit: extendedCredits.length > 0,
+          createMetaPixDirectly: false,
+          createMetaBoletoDirectly: false,
+          addMetaPaymentMethodDirectly: false,
+          addMetaFundsDirectly: false,
         },
-        securityNotice: 'Dados sensíveis de cartão, Pix ou boleto não são coletados nem armazenados pela Gestão Ads. Inclusão de forma de pagamento e recarga são concluídas no fluxo oficial da Meta, respeitando as permissões do usuário na conta de anúncios.',
+        securityNotice: 'A integração usa o token Meta já conectado para consultar saldo, cobrança, fontes financeiras e linhas de crédito disponíveis. A API pública da Meta não expõe uma operação para gerar Pix/boleto de recarga nem cadastrar cartão arbitrariamente; a plataforma não simula essas operações para evitar cobrança sem crédito real na conta de anúncios.',
         updatedAt: new Date().toISOString(),
       });
     } catch (error: any) {
