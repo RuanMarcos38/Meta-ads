@@ -349,11 +349,9 @@ async function callOpenAI(input: {
 export function wantsHumanHandoff(text: string) {
   const normalized = text.toLowerCase();
   return [
-    /falar com (o |a )?(gestor|humano|atendente|pessoa|especialista)/,
-    /quero (um |uma )?(gestor|humano|atendente|pessoa)/,
-    /me passa (pro|pra|para)( o| a| um| uma)? (gestor|humano|atendente|pessoa|especialista)/,
-    /chama (o |a )?(gestor|humano|atendente)/,
-    /preciso (do|da|de um|de uma) (gestor|humano|atendente)/,
+    /(falar|conversar|passar|passa|encaminhar|encaminha|chamar|chama).{0,30}(gestor|humano|atendente|pessoa|especialista)/,
+    /quero (um |uma )?(gestor|humano|atendente|pessoa|especialista)/,
+    /preciso (do|da|de um|de uma) (gestor|humano|atendente|pessoa|especialista)/,
     /não quero (falar com )?(a )?i[.a]?/,
   ].some((pattern) => pattern.test(normalized));
 }
