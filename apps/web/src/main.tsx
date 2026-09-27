@@ -32,6 +32,23 @@ function Roles({ roles, children }: { roles: string[]; children: React.ReactNode
   return user && roles.includes(user.role) ? <>{children}</> : <Navigate to="/" replace />;
 }
 
+function registerAppServiceWorker() {
+  if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).then((registration) => {
+      const update = () => { void registration.update(); };
+      update();
+      window.setInterval(update, 30 * 60 * 1000);
+    }).catch(() => {
+      // O site continua funcionando normalmente mesmo se a instalação PWA não estiver disponível.
+    });
+  }, { once: true });
+}
+
+registerAppServiceWorker();
+
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
