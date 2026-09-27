@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, ExternalLink, Link2, RefreshCw, ShieldAlert, Unplug, Wrench } from 'lucide-react';
+import { CheckCircle2, Link2, RefreshCw, Unplug, Wrench } from 'lucide-react';
 import { api } from '../api';
 import { useAuth, useScope } from '../store';
 
@@ -44,7 +44,7 @@ type ManagementStatus = {
   } | null;
 };
 
-const META_RATE_LIMIT_NOTICE = 'A Meta atingiu o limite temporário de requisições (#4). A conexão e o token continuam válidos, e os dados já sincronizados foram preservados. Aguarde a liberação da Meta antes de atualizar novamente.';
+const META_RATE_LIMIT_NOTICE = 'A Meta está temporariamente indisponível para novas atualizações. A conexão permanece ativa e os dados existentes foram preservados. Tente novamente mais tarde.';
 
 function isMetaRateLimitMessage(value: unknown) {
   const message = String(value || '').toLowerCase();
@@ -57,8 +57,8 @@ function isMetaRateLimitMessage(value: unknown) {
 function friendlyMetaError(value: unknown) {
   if (!value) return '';
   return isMetaRateLimitMessage(value)
-    ? 'Limite temporário da Meta (#4). Conexão preservada; tente sincronizar novamente mais tarde.'
-    : String(value);
+    ? 'A Meta está temporariamente indisponível para novas atualizações. Tente novamente mais tarde.'
+    : 'Não foi possível concluir a atualização neste momento.';
 }
 
 export default function Integrations() {
@@ -152,7 +152,7 @@ export default function Integrations() {
       <div>
         <p className="section-kicker">Configurações</p>
         <h1>Integração Meta</h1>
-        <p>Conexão, token, permissões, contas e sincronização ficam concentrados aqui, sem poluir as telas operacionais.</p>
+        <p>Gerencie a conexão com a Meta e as contas vinculadas a cada empresa.</p>
       </div>
       {canAdmin && <button className="secondary-button" onClick={() => { void refreshDirectory(); }} disabled={action === 'refresh'}>
         <RefreshCw size={14} className={action === 'refresh' ? 'animate-spin' : ''} />Atualizar BMs
@@ -172,8 +172,7 @@ export default function Integrations() {
             <p className="panel-subtitle">Uma única conexão da R2R consulta as BMs disponíveis. Depois, cada BM é vinculada somente à empresa correta.</p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
               <span>Status: <strong>{management.connected ? 'Conectada' : 'Desconectada'}</strong></span>
-              <span>Escopo: <strong>Organização inteira</strong></span>
-              {management.connection?.tokenExpiresAt && <span>Token: <strong>até {new Date(management.connection.tokenExpiresAt).toLocaleDateString('pt-BR')}</strong></span>}
+              <span>Disponibilidade: <strong>{management.connected ? 'Ativa' : 'Inativa'}</strong></span>
             </div>
           </div>
         </div>
@@ -207,8 +206,8 @@ export default function Integrations() {
                 <span className="status-chip status-success">{row.assignedAccountCount} conta(s)</span>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-500">
-                <span>Última sync: <b>{row.lastSyncAt ? new Date(row.lastSyncAt).toLocaleString('pt-BR') : '—'}</b></span>
-                <span>Status: <b>{row.lastSyncStatus}</b></span>
+                <span>Última atualização: <b>{row.lastSyncAt ? new Date(row.lastSyncAt).toLocaleString('pt-BR') : '—'}</b></span>
+                <span>Situação: <b>{row.lastSyncStatus === 'success' ? 'Atualizada' : row.lastSyncStatus === 'running' ? 'Atualizando' : row.lastSyncStatus === 'error' ? 'Atenção necessária' : 'Aguardando'}</b></span>
               </div>
               {row.lastError && <p className="mt-2 text-[10px] text-amber-700">{friendlyMetaError(row.lastError)}</p>}
             </div>)}
@@ -220,24 +219,5 @@ export default function Integrations() {
       })}
     </section>
 
-    <section className="corporate-card p-4">
-      <div className="flex gap-3">
-        <ShieldAlert size={17} className="mt-0.5 text-[#176846]" />
-        <div>
-          <h2 className="panel-title">Detalhes técnicos</h2>
-          <p className="panel-subtitle">Exibidos apenas nesta área administrativa.</p>
-          <div className="mt-3 grid gap-2 text-[10px] text-slate-500 md:grid-cols-2">
-            <span>API: <strong>https://api-gestao.r2rmarketingdigital.com.br</strong></span>
-            <span>Atualização automática: <strong>a cada 5 minutos</strong></span>
-            <span>Permissões: <strong>ads_read, ads_management, business_management</strong></span>
-            <span>Histórico: <strong>preservado ao desconectar</strong></span>
-          </div>
-          <p className="mt-3 text-[9px] leading-4 text-slate-500">Em caso de limite temporário da Meta (#4), a ferramenta mantém a autorização e os dados existentes. Não é necessário reconectar a conta; aguarde a quota normalizar antes de atualizar as BMs novamente.</p>
-          <a className="mt-3 inline-flex items-center gap-1 text-[10px] font-semibold text-[#176846]" href="https://business.facebook.com/" target="_blank" rel="noreferrer">
-            Abrir Gerenciador da Meta <ExternalLink size={11} />
-          </a>
-        </div>
-      </div>
-    </section>
   </div>;
 }
