@@ -465,3 +465,19 @@ model AuditLog {
   @@index([organizationId, createdAt])
   @@index([organizationId, businessId, createdAt])
 }
+
+model WhatsAppDailyDeliveryGuard {
+  id             String   @id @default(uuid())
+  organizationId String
+  clientId       String
+  phone          String
+  localDate      String
+  reason         String
+  status         String   @default("RESERVED")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, phone, localDate])
+  @@index([organizationId, clientId, localDate])
+  @@index([organizationId, localDate])
+}
