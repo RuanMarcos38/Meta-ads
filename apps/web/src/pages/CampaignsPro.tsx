@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarRange, ChevronRight, Filter, Layers3, Megaphone, MonitorSmartphone, Pause, Play, Plus, RefreshCw, Search, Target, UsersRound, X } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth, useScope } from '../store';
 
@@ -56,6 +56,7 @@ export default function CampaignsPro() {
   const user = useAuth((state) => state.user);
   const scope = useScope();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const canManage = ['SUPER_ADMIN', 'AGENCY_ADMIN', 'MANAGER'].includes(user?.role || '');
   const [tab, setTab] = useState<'campaigns' | 'adsets' | 'ads'>('campaigns');
   const [since, setSince] = useState(ago(29));
@@ -103,7 +104,9 @@ export default function CampaignsPro() {
   useEffect(() => {
     const preferred = scope.adAccountId && createAccounts.some((item) => item.id === scope.adAccountId)
       ? scope.adAccountId
-      : createAccounts[0]?.id || '';
+      : createAccounts.length === 1
+        ? createAccounts[0].id
+        : '';
     if (!createAccounts.some((item) => item.id === createAccountId)) setCreateAccountId(preferred);
   }, [createAccounts, createAccountId, scope.adAccountId]);
 
@@ -242,8 +245,8 @@ export default function CampaignsPro() {
 
     {showCreate && canManage && <form onSubmit={createCampaign} className="corporate-card p-4">
       <div className="mb-4 flex flex-col gap-1"><p className="section-kicker">Meta Ads</p><h2 className="panel-title">Criar nova campanha</h2><p className="panel-subtitle">A campanha será criada na empresa, BM e conta selecionadas acima e permanecerá pausada até sua revisão.</p></div>
-      {!scope.clientId || !scope.businessId ? <div className="message-warning">Selecione uma empresa e uma BM antes de criar a campanha.</div> : !createAccounts.length ? <div className="message-warning">Nenhuma conta Meta autorizada está vinculada a esta BM.</div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <label className="field-label">Conta de anúncio<select required className="field-control" value={createAccountId} onChange={(e) => setCreateAccountId(e.target.value)}>{createAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}{account.currency ? ` · ${account.currency}` : ''}</option>)}</select></label>
+      {!scope.clientId || !scope.businessId ? <div className="message-warning flex flex-wrap items-center justify-between gap-2"><span>Esta empresa ainda não possui uma BM vinculada. Vincule a BM correta antes de criar a campanha.</span><button type="button" className="secondary-button" onClick={() => navigate('/empresas')}>Vincular BM à empresa</button></div> : !createAccounts.length ? <div className="message-warning flex flex-wrap items-center justify-between gap-2"><span>Nenhuma conta de anúncios autorizada está vinculada a esta BM.</span><button type="button" className="secondary-button" onClick={() => navigate('/empresas')}>Configurar BM e contas</button></div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <label className="field-label">Conta de anúncio<select required className="field-control" value={createAccountId} onChange={(e) => setCreateAccountId(e.target.value)}><option value="">Selecione a conta</option>{createAccounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.accountId}{account.currency ? ` · ${account.currency}` : ''}</option>)}</select></label>
         <label className="field-label md:col-span-1 xl:col-span-2">Nome da campanha<input required minLength={3} maxLength={200} className="field-control" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Leads WhatsApp Joinville" /></label>
         <label className="field-label">Objetivo<select className="field-control" value={objective} onChange={(e) => setObjective(e.target.value)}>{objectives.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label className="field-label">Orçamento diário<input className="field-control" inputMode="decimal" value={dailyBudget} onChange={(e) => setDailyBudget(e.target.value)} placeholder="Opcional" /><span className="mt-1 block text-[9px] font-normal text-slate-400">Valor na moeda da conta selecionada.</span></label>
