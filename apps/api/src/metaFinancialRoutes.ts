@@ -307,16 +307,7 @@ async function getFinancialAccountWithFallback(
         const graph = await getFinancialAccountGraph(path, token);
         const data = graph.data;
         const currency = String(data?.currency || currencyHint || 'BRL').toUpperCase();
-        const liveDisplayedBalance = resolveDisplayedBalance(data, currency);
-      const displayedBalance = liveDisplayedBalance.value != null
-        ? liveDisplayedBalance
-        : financial.balanceSnapshot
-          ? {
-              value: financial.balanceSnapshot.value,
-              label: financial.balanceSnapshot.label,
-              source: 'last_confirmed_meta_balance',
-            }
-          : liveDisplayedBalance;
+        const displayedBalance = resolveDisplayedBalance(data, currency);
 
         const liveSnapshot: ConfirmedBalanceSnapshot | null = displayedBalance.value == null
           ? null
@@ -568,7 +559,16 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
       const token = financial.token;
       const data = financial.data;
       const currency = String(data?.currency || account.currency || 'BRL').toUpperCase();
-      const displayedBalance = resolveDisplayedBalance(data, currency);
+      const liveDisplayedBalance = resolveDisplayedBalance(data, currency);
+      const displayedBalance = liveDisplayedBalance.value != null
+        ? liveDisplayedBalance
+        : financial.balanceSnapshot
+          ? {
+              value: financial.balanceSnapshot.value,
+              label: financial.balanceSnapshot.label,
+              source: 'last_confirmed_meta_balance',
+            }
+          : liveDisplayedBalance;
       const rawAccountId = String(data?.account_id || account.accountId).replace(/^act_/, '');
       const businessId = account.businessId || query.data.businessId || null;
 
