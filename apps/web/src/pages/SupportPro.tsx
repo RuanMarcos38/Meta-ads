@@ -256,11 +256,11 @@ export default function SupportPro(){
 
  const selectedMeta=presenceMeta(selectedPresence);
 
- return <div className="h-full min-h-0">
+ return <div className="h-[calc(100dvh-1.5rem)] min-h-[640px] lg:h-[calc(100vh-1.5rem)] lg:min-h-0">
   {error&&<div className="message-warning m-2">{error}</div>}
 
   <section className="h-full min-h-0 overflow-hidden bg-white">
-   <div className="grid h-full min-h-[680px] lg:min-h-0 lg:grid-cols-[360px_minmax(0,1fr)]">
+   <div className="grid h-full min-h-0 lg:grid-cols-[360px_minmax(0,1fr)]">
     <aside className={`${selected?'hidden lg:flex':'flex'} h-full min-h-0 flex-col border-r border-[#d8dedb] bg-white`}>
      <div className="flex h-[62px] items-center justify-between bg-[#f0f2f5] px-4">
       <div className="flex min-w-0 items-center gap-3">
@@ -347,7 +347,7 @@ export default function SupportPro(){
 
       {showMessageSearch&&<div className="border-b border-[#d8dedb] bg-white px-3 py-2"><div className="mx-auto flex max-w-xl items-center rounded-[8px] bg-[#f0f2f5] px-3"><Search size={14} className="text-[#54656f]"/><input autoFocus className="h-9 flex-1 bg-transparent px-3 text-[10px] outline-none" placeholder="Pesquisar mensagens" value={messageSearch} onChange={e=>setMessageSearch(e.target.value)}/><button onClick={()=>{setShowMessageSearch(false);setMessageSearch('');}} className="text-[#54656f]"><X size={15}/></button></div></div>}
 
-      <div className="premium-scrollbar relative flex-1 overflow-y-auto px-3 py-5 sm:px-8" style={{backgroundColor:'#efeae2',backgroundImage:'radial-gradient(circle at 10px 10px, rgba(100,90,80,.045) 1.2px, transparent 1.3px), radial-gradient(circle at 28px 24px, rgba(100,90,80,.035) 1px, transparent 1.1px)',backgroundSize:'38px 38px'}}>
+      <div className="premium-scrollbar relative min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-8" style={{backgroundColor:'#efeae2',backgroundImage:'radial-gradient(circle at 10px 10px, rgba(100,90,80,.045) 1.2px, transparent 1.3px), radial-gradient(circle at 28px 24px, rgba(100,90,80,.035) 1px, transparent 1.1px)',backgroundSize:'38px 38px'}}>
        <div className="mx-auto flex max-w-[920px] flex-col gap-1.5">
         {visibleMessages.map(m=>{
          const mine=m.senderId===user?.id;
