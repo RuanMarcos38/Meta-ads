@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateCampaignHealth, wantsHumanHandoff } from './campaignAgent.js';
+import { evaluateCampaignHealth, fallbackAdminReport, wantsHumanHandoff } from './campaignAgent.js';
 
 describe('campaignAgent', () => {
   it('desativa IA quando cliente pede atendimento humano/gestor', () => {
@@ -32,6 +32,65 @@ describe('campaignAgent', () => {
     );
     expect(health.score).toBeLessThan(70);
     expect(health.issues.join(' ')).toContain('sem entrega');
+  });
+
+  it('formata o relatório diário em blocos curtos para WhatsApp', () => {
+    const report = fallbackAdminReport([
+      {
+        client: 'Ecojoi',
+        campaignCount: 23,
+        attentionCount: 3,
+        attentionCampaigns: [
+          {
+            bm: 'Ecojoi',
+            name: 'Sales Campaign',
+            status: 'attention',
+            score: 55,
+            spend: 0,
+            ctr: 0,
+            cpc: 0,
+            conversations: 0,
+            costPerConversation: 0,
+            frequency: 0,
+            roas: 0,
+            issues: ['Campanha ativa sem entrega/impressões no período.'],
+          },
+        ],
+        healthyCampaigns: [],
+        campaigns: [],
+      },
+      {
+        client: 'ERREJOTA BAR',
+        campaignCount: 4,
+        attentionCount: 0,
+        attentionCampaigns: [],
+        healthyCampaigns: [
+          {
+            bm: 'Restaurante',
+            name: 'CBO - SABADO - PAGODE',
+            status: 'excellent',
+            score: 100,
+            spend: 292.06,
+            ctr: 1.75,
+            cpc: 0.98,
+            conversations: 28,
+            costPerConversation: 10.43,
+            frequency: 1.91,
+            roas: 0,
+            issues: [],
+          },
+        ],
+        campaigns: [],
+      },
+    ] as any, '2026-09-27');
+
+    expect(report).toContain('📊 *GESTÃO ADS | RELATÓRIO DIÁRIO*');
+    expect(report).toContain('🚨 *PRECISA DE ATENÇÃO*');
+    expect(report).toContain('✅ *SEM ALERTAS CRÍTICOS*');
+    expect(report).toContain('Campanha ativa sem entrega no período');
+    expect(report).not.toContain('[attention/55]');
+    expect(report).not.toContain('[excellent/100]');
+    expect(report.length).toBeLessThan(3201);
   });
 
   it('detecta CTR baixo, frequência alta e gasto sem resultado', () => {
