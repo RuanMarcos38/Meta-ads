@@ -506,7 +506,7 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
     return ok(updated, 'Business Manager atualizada.');
   });
 
-  app.post('/workspace/business-managers/:id/sync', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN', 'MANAGER']) }, async (req, reply) => {
+  app.post('/workspace/business-managers/:id/sync', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN', 'MANAGER', 'CLIENT']) }, async (req, reply) => {
     const user = req.user as AuthUser;
     const params = z.object({ id: z.string().uuid() }).safeParse(req.params);
     const body = z.object({ since: dateText.optional(), until: dateText.optional(), fullHistory: z.boolean().optional() }).safeParse(req.body);
