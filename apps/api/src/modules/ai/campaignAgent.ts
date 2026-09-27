@@ -651,10 +651,49 @@ export async function handleSupportMessageWithAi(input: {
   });
 }
 
-function compactCampaignLine(item: any) {
+function campaignReportItem(item: any) {
   const m = item.metricsJson as any || {};
-  const issues = Array.isArray(item.issuesJson) ? item.issuesJson.slice(0, 2).join(' | ') : '';
-  return `${item.campaignName} [${item.status}/${item.score}] — Invest. ${money(number(m.spend))}; CTR ${decimal(number(m.ctr))}%; CPC ${money(number(m.cpc))}; Conv. ${integer(number(m.conversations))}; Custo/conv. ${money(number(m.costPerConversation))}; Freq. ${decimal(number(m.frequency))}; ROAS ${decimal(number(m.roas))}x${issues ? `; sinais: ${issues}` : ''}`;
+  return {
+    name: String(item.campaignName || 'Campanha sem nome'),
+    status: String(item.status || ''),
+    score: number(item.score),
+    spend: number(m.spend),
+    ctr: number(m.ctr),
+    cpc: number(m.cpc),
+    conversations: number(m.conversations),
+    costPerConversation: number(m.costPerConversation),
+    frequency: number(m.frequency),
+    roas: number(m.roas),
+    issues: Array.isArray(item.issuesJson) ? item.issuesJson.map((value: unknown) => String(value)).slice(0, 3) : [],
+  };
+}
+
+function shortIssue(value: string) {
+  const issue = value.trim();
+  const lower = issue.toLowerCase();
+  if (lower.includes('ativa sem entrega') || lower.includes('sem entrega/impressões')) return 'Campanha ativa sem entrega no período';
+  if (lower.includes('ctr baixo')) return 'CTR abaixo do esperado';
+  if (lower.includes('frequência alta')) return 'Frequência alta / possível saturação';
+  if (lower.includes('sem geração') || lower.includes('sem resultado')) return 'Investimento sem resultado no período';
+  if (lower.includes('custo por conversa')) return 'Custo por conversa em atenção';
+  if (lower.includes('roas')) return 'ROAS em atenção';
+  return issue.replace(/[.;]+$/, '');
+}
+
+function activeMetricLine(campaign: ReturnType<typeof campaignReportItem>) {
+  const parts: string[] = [];
+  if (campaign.spend > 0) parts.push(`💰 ${money(campaign.spend)}`);
+  if (campaign.ctr > 0) parts.push(`CTR ${decimal(campaign.ctr)}%`);
+  if (campaign.conversations > 0) parts.push(`💬 ${integer(campaign.conversations)}`);
+  if (campaign.costPerConversation > 0) parts.push(`${money(campaign.costPerConversation)}/conv.`);
+  if (campaign.frequency > 0 && campaign.frequency >= 2.5) parts.push(`Freq. ${decimal(campaign.frequency)}`);
+  if (campaign.roas > 0) parts.push(`ROAS ${decimal(campaign.roas)}x`);
+  return parts.join(' | ');
+}
+
+function reportDate(date: string) {
+  const [year, month, day] = date.split('-');
+  return year && month && day ? `${day}/${month}/${year}` : date;
 }
 
 async function organizationReportContext(organizationId: string) {
@@ -674,34 +713,79 @@ async function organizationReportContext(organizationId: string) {
   const managerMap = new Map(managers.map((m) => [`${m.clientId}:${m.metaBusinessId}`, m.name]));
 
   return clients.map((client) => {
-    const campaigns = health.filter((h) => h.clientId === client.id);
-    const critical = campaigns.filter((h) => h.status === 'critical' || h.status === 'attention');
+    const rows = health.filter((h) => h.clientId === client.id);
+    const enriched = rows.map((h) => ({
+      bm: managerMap.get(`${client.id}:${h.businessId || ''}`) || h.businessId || 'BM não identificada',
+      ...campaignReportItem(h),
+    }));
+    const attention = enriched.filter((item) => item.status === 'critical' || item.status === 'attention');
+    const healthy = enriched
+      .filter((item) => !attention.includes(item))
+      .sort((a, b) => (b.conversations - a.conversations) || (b.spend - a.spend) || (b.ctr - a.ctr));
+
     return {
       client: client.name,
-      campaignCount: campaigns.length,
-      attentionCount: critical.length,
-      campaigns: campaigns.slice(0, 8).map((h) => ({
-        bm: managerMap.get(`${client.id}:${h.businessId || ''}`) || h.businessId || 'BM não identificada',
-        line: compactCampaignLine(h),
-      })),
+      campaignCount: enriched.length,
+      attentionCount: attention.length,
+      attentionCampaigns: attention.slice(0, 4),
+      healthyCampaigns: healthy.slice(0, 3),
+      campaigns: enriched.slice(0, 8),
     };
   });
 }
 
-function fallbackAdminReport(context: Awaited<ReturnType<typeof organizationReportContext>>, date: string) {
+export function fallbackAdminReport(context: Awaited<ReturnType<typeof organizationReportContext>>, date: string) {
+  const totalCampaigns = context.reduce((sum, client) => sum + client.campaignCount, 0);
+  const totalAttention = context.reduce((sum, client) => sum + client.attentionCount, 0);
+  const attentionClients = context.filter((client) => client.attentionCount > 0);
+  const healthyClients = context.filter((client) => client.attentionCount === 0);
+
   const lines = [
-    `📊 *Análise diária IA — Gestão Ads — ${date}*`,
+    '📊 *GESTÃO ADS | RELATÓRIO DIÁRIO*',
+    `📅 ${reportDate(date)}`,
     '',
-    `Clientes analisados: ${context.length}`,
+    `👥 *${context.length} clientes*  •  🎯 ${totalCampaigns} campanhas  •  ⚠️ ${totalAttention} em atenção`,
   ];
-  for (const client of context) {
-    lines.push('', `🏢 *${client.client}* — ${client.campaignCount} campanha(s), ${client.attentionCount} em atenção`);
-    for (const campaign of client.campaigns.slice(0, 3)) {
-      lines.push(`• ${campaign.bm}: ${campaign.line}`);
+
+  if (attentionClients.length) {
+    lines.push('', '🚨 *PRECISA DE ATENÇÃO*');
+    for (const client of attentionClients) {
+      lines.push('', `🏢 *${client.client}*  •  ${client.campaignCount} campanhas | ⚠️ ${client.attentionCount}`);
+      for (const campaign of client.attentionCampaigns.slice(0, 2)) {
+        lines.push(`• *${campaign.name}*`);
+        lines.push(`  📍 ${campaign.bm}`);
+        const issue = campaign.issues[0] ? shortIssue(campaign.issues[0]) : 'Revisar desempenho e entrega';
+        lines.push(`  ⚠️ ${issue}`);
+        const metrics = activeMetricLine(campaign);
+        if (metrics) lines.push(`  ${metrics}`);
+      }
+      if (client.attentionCount > 2) lines.push(`  + ${client.attentionCount - 2} campanha(s) sinalizada(s) na ferramenta`);
     }
   }
-  lines.push('', 'Priorize campanhas críticas, CTR baixo, frequência alta e aumento de custo por conversa. Consulte a ferramenta para o diagnóstico completo por BM.');
-  return lines.join('\n').slice(0, 3900);
+
+  if (healthyClients.length) {
+    lines.push('', '✅ *SEM ALERTAS CRÍTICOS*');
+    for (const client of healthyClients) {
+      const highlight = client.healthyCampaigns[0];
+      lines.push(`• *${client.client}* — ${client.campaignCount} campanha(s)`);
+      if (highlight) {
+        const metrics = activeMetricLine(highlight);
+        lines.push(`  ⭐ ${highlight.name}${metrics ? ` | ${metrics}` : ''}`);
+      }
+    }
+  }
+
+  lines.push('', '🎯 *FOCO DO DIA*');
+  if (attentionClients.length) {
+    lines.push(`1. Verificar as campanhas sinalizadas de ${attentionClients.map((client) => client.client).join(', ')}.`);
+    lines.push('2. Priorizar falhas de entrega, CTR baixo, saturação e aumento de custo.');
+  } else {
+    lines.push('1. Nenhuma campanha exige ação crítica neste momento.');
+    lines.push('2. Manter acompanhamento de custo, CTR e frequência ao longo do dia.');
+  }
+  lines.push('3. Diagnóstico completo por BM disponível na Gestão Ads.');
+
+  return lines.join('\n').slice(0, 3200);
 }
 
 async function buildAiAdminReport(organizationId: string, date: string) {
@@ -736,14 +820,16 @@ async function buildAiAdminReport(organizationId: string, date: string) {
 
   const prompt = [
     `Data local: ${date}`,
-    'Produza um relatório executivo diário PRIVADO para o administrador da agência.',
-    'Analise todos os clientes e BMs separadamente. Nunca misture números entre clientes.',
-    'Pense como gestor de tráfego sênior de alta performance: destaque risco, oportunidade, provável causa e ação prioritária.',
-    'Use no máximo 3 pontos por cliente e finalize com as 5 prioridades gerais do dia.',
-    'Se uma causa não puder ser comprovada pelos dados, trate como hipótese e diga o que verificar.',
-    'Para os criativos fornecidos, faça análise visual quando houver imagem: clareza, oferta, hierarquia, legibilidade, adequação ao objetivo e relação com CTR/frequência.',
-    'Não chame um criativo de ruim apenas por CTR baixo; diferencie evidência visual, hipótese de público/oferta e problema de entrega.',
-    'Texto para WhatsApp, direto, profissional, sem tabelas, até 3.800 caracteres.',
+    'Produza um relatório executivo diário PRIVADO para o administrador da agência, otimizado para leitura rápida no WhatsApp.',
+    'Nunca misture clientes, BMs ou contas. Não altere os números recebidos.',
+    'REGRA VISUAL OBRIGATÓRIA: use blocos curtos, linhas em branco entre clientes e no máximo 2 campanhas detalhadas por cliente.',
+    'Não mostre códigos técnicos como [excellent/100], [attention/55] ou listas longas de métricas zeradas.',
+    'Use este formato: cabeçalho + resumo geral; depois 🚨 PRECISA DE ATENÇÃO; depois ✅ SEM ALERTAS CRÍTICOS; finalize com 🎯 FOCO DO DIA em no máximo 3 ações.',
+    'Para campanha em atenção mostre: nome, BM, 1 motivo principal e somente métricas úteis/não zeradas (investimento, CTR, conversas, custo/conv., frequência ou ROAS).',
+    'Para cliente sem alerta mostre apenas 1 campanha de destaque e até 4 métricas relevantes. Não liste todas as campanhas saudáveis.',
+    'Se uma causa não puder ser comprovada, trate como hipótese e diga o que verificar em poucas palavras.',
+    'Para criativos fornecidos, faça análise visual somente quando isso gerar uma ação objetiva; não polua o relatório.',
+    'Texto direto e profissional, sem tabelas, sem parágrafos longos, sem repetição e com no máximo 2.800 caracteres.',
     '',
     'Carteira de campanhas:',
     JSON.stringify(context, null, 2),
@@ -755,9 +841,9 @@ async function buildAiAdminReport(organizationId: string, date: string) {
       system: 'Você é um gestor de tráfego sênior responsável pela análise privada de uma carteira de clientes. Seja técnico, criterioso, orientado a evidências e objetivo.',
       user: prompt,
       images,
-      maxOutputTokens: 1500,
+      maxOutputTokens: 1100,
     });
-    return generated.slice(0, 3900);
+    return generated.slice(0, 3000);
   } catch {
     return fallbackAdminReport(context, date);
   }
