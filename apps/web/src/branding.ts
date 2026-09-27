@@ -41,6 +41,11 @@ export function applyBranding(branding: Branding) {
   root.style.setProperty('--brand-secondary', branding.secondaryColor || defaultBranding.secondaryColor);
   document.title = branding.name || defaultBranding.name;
 
+  const theme = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (theme) theme.content = branding.primaryColor || defaultBranding.primaryColor;
+  const appleTitle = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]');
+  if (appleTitle) appleTitle.content = branding.name || defaultBranding.name;
+
   if (branding.faviconUrl) {
     let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (!link) {
