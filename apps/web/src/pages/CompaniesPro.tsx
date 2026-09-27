@@ -222,13 +222,18 @@ export default function CompaniesPro() {
     setCreating(true);
     setError('');
     try {
-      await api.post('/workspace/clients/create-with-business-managers', {
+      const response = await api.post('/workspace/clients/create-with-business-managers', {
         name: name.trim(),
         selections: selected.map((business) => ({
           businessId: business.businessId,
           accountIds: business.accounts.filter((account) => account.selected).map((account) => account.accountId),
         })),
       });
+      const createdClientId = String(response.data?.data?.client?.id || '');
+      if (createdClientId) {
+        scope.setClientId(createdClientId);
+        scope.setBusinessId(selected[0]?.businessId || '');
+      }
       setName('');
       setNewBusinesses([]);
       setNewBusinessLoaded(false);
@@ -376,6 +381,8 @@ export default function CompaniesPro() {
             accountIds: business.accounts.filter((account) => account.selected).map((account) => account.accountId),
           })),
         });
+        scope.setClientId(editing.id);
+        scope.setBusinessId(selectedBusinesses[0]?.businessId || '');
       }
 
       setEditing(null);
@@ -486,7 +493,13 @@ export default function CompaniesPro() {
               {!business.accounts.length && <p className="text-[10px] text-slate-400">Esta BM não retornou contas de anúncios.</p>}
             </div>}
           </article>)}
-          {!newBusinesses.length && <div className="empty-state corporate-card col-span-full"><BriefcaseBusiness size={18} /><span>Nenhuma BM disponível para vincular.</span></div>}
+          {!newBusinesses.length && <div className="empty-state corporate-card col-span-full">
+            <BriefcaseBusiness size={18} />
+            <span>Nenhuma BM foi localizada para o usuário Meta conectado à ferramenta.</span>
+            <button type="button" className="secondary-button" onClick={() => { void connectManagementForCompanies(); }} disabled={newMetaConnecting}>
+              <Link2 size={13} />{newMetaConnecting ? 'Reconectando...' : 'Reconectar ferramenta à Meta'}
+            </button>
+          </div>}
         </div>
       </div>}
     </form>}
@@ -548,7 +561,18 @@ export default function CompaniesPro() {
                 {!business.accounts.length && <p className="text-[10px] text-slate-400">Esta BM não retornou contas de anúncios.</p>}
               </div>}
             </article>)}
-            {!editBusinesses.length && <div className="empty-state corporate-card col-span-full"><BriefcaseBusiness size={18} /><span>Nenhuma BM encontrada para o usuário Meta conectado.</span></div>}
+            {!editBusinesses.length && <div className="empty-state corporate-card col-span-full">
+              <BriefcaseBusiness size={18} />
+              <span>Nenhuma BM foi localizada. Atualize a lista ou reconecte a ferramenta à Meta para renovar as permissões de business_management.</span>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button type="button" className="secondary-button" onClick={() => { void loadEditBusinesses(editing.id); }} disabled={editBusinessLoading}>
+                  <RefreshCw size={13} />Atualizar BMs
+                </button>
+                <button type="button" className="secondary-button" onClick={() => { void connectEditMeta(editing.id); }} disabled={editMetaConnecting}>
+                  <Link2 size={13} />{editMetaConnecting ? 'Reconectando...' : 'Reconectar ferramenta à Meta'}
+                </button>
+              </div>
+            </div>}
           </div>}
         </div>
 
