@@ -69,7 +69,7 @@ function currencyAmountToMajor(value: any, fallbackCurrency: string): number | n
   return null;
 }
 
-function resolveDisplayedBalance(data: any, currency: string) {
+export function resolveDisplayedBalance(data: any, currency: string) {
   const isPrepay = Boolean(data?.is_prepay_account) || String(data?.stored_balance_status || '').toLowerCase() === 'prepay';
 
   if (isPrepay) {
