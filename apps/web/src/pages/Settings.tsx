@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Database, Link2, MessageSquareText, Palette, RefreshCw, Save, Settings2, ShieldCheck, Users } from 'lucide-react';
+import { Bell, Bot, Database, Link2, MessageSquareText, Palette, RefreshCw, Save, Settings2, ShieldCheck, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { applyBranding, defaultBranding, normalizeBranding, type Branding } from '../branding';
@@ -14,6 +14,9 @@ export default function Settings(){
   const [branding,setBranding]=useState<Branding>(defaultBranding);
   const [brandingLoading,setBrandingLoading]=useState(false);
   const [brandingMessage,setBrandingMessage]=useState('');
+  const [aiStatus,setAiStatus]=useState<any>(null);
+  const [aiRunning,setAiRunning]=useState(false);
+  const [aiMessage,setAiMessage]=useState('');
 
   const cards=[
     ['Integração Meta','Conexões, tokens, permissões e saúde das BMs.','/integracoes',Link2],
@@ -26,8 +29,21 @@ export default function Settings(){
   useEffect(()=>{
     if(!admin)return;
     api.get('/workspace/branding').then(r=>setBranding(normalizeBranding(r.data?.data))).catch(()=>undefined);
+    api.get('/ai/status').then(r=>setAiStatus(r.data?.data||null)).catch(()=>undefined);
   },[admin]);
 
+  async function analyzeNow(){
+    if(!admin)return;
+    setAiRunning(true);setAiMessage('');
+    try{
+      const r=await api.post('/ai/analyze/now');
+      setAiMessage('Análise atualizada: '+String(r.data?.data?.processed||0)+' campanha(s) processada(s).');
+      const status=await api.get('/ai/status');
+      setAiStatus(status.data?.data||null);
+    }catch(error:any){
+      setAiMessage(error?.response?.data?.error?.message||'Não foi possível atualizar a análise da IA.');
+    }finally{setAiRunning(false);}
+  }
   async function saveBranding(event:React.FormEvent){
     event.preventDefault();
     if(!admin)return;
@@ -67,6 +83,27 @@ export default function Settings(){
     </section>
 
     <PwaInstallCard />
+
+    {admin&&<section className="corporate-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex gap-3">
+          <span className="metric-icon"><Bot size={15}/></span>
+          <div>
+            <h2 className="panel-title">Agente IA de Campanhas</h2>
+            <p className="panel-subtitle">Pré-atendimento humanizado, leitura contínua das campanhas e análise privada diária para o administrador.</p>
+          </div>
+        </div>
+        <button className="primary-button" type="button" onClick={()=>{void analyzeNow();}} disabled={aiRunning}><RefreshCw size={13} className={aiRunning?'animate-spin':''}/>{aiRunning?'Analisando...':'Analisar agora'}</button>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mini-stat"><span>IA</span><strong>{aiStatus?.configured?'Configurada':'Aguardando chave'}</strong><small>{aiStatus?.model||'modelo configurável'}</small></div>
+        <div className="mini-stat"><span>Análise contínua</span><strong>{aiStatus?.intervalMinutes?('A cada '+aiStatus.intervalMinutes+' min'):'—'}</strong><small>24 horas por dia</small></div>
+        <div className="mini-stat"><span>Relatório privado</span><strong>{aiStatus?.dailyReportHour!==undefined?(String(aiStatus.dailyReportHour).padStart(2,'0')+':00'):'—'}</strong><small>WhatsApp {aiStatus?.adminWhatsapp||'administrador'}</small></div>
+        <div className="mini-stat"><span>Última análise</span><strong>{aiStatus?.lastAnalysisAt?new Date(aiStatus.lastAnalysisAt).toLocaleString('pt-BR'):'Ainda não executada'}</strong><small>Campanhas e métricas</small></div>
+      </div>
+      {!aiStatus?.configured&&<div className="message-warning mt-3">Para respostas inteligentes e análise visual de criativos, configure <strong>OPENAI_API_KEY</strong> no EasyPanel. Sem a chave, a ferramenta mantém a análise técnica e encaminha o chat ao humano.</div>}
+      {aiMessage&&<div className="message-success mt-3">{aiMessage}</div>}
+    </section>}
 
     {admin&&<form onSubmit={saveBranding} className="corporate-card p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
