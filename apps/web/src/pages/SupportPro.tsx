@@ -151,10 +151,10 @@ export default function SupportPro(){
 
  useEffect(()=>{bottom.current?.scrollIntoView({behavior:'smooth'});},[msgs.length]);
 
+ const availablePeople=useMemo(()=>people.filter(p=>p.id!==user?.id),[people,user?.id]);
  const visible=useMemo(()=>convs.filter(c=>(filter==='ALL'||(filter!=='CONTACTS'&&c.type===filter))&&(!search.trim()||[c.subject,c.peer?.name,c.peer?.email,c.requester?.name,c.requester?.email,c.lastMessage?.body].some(v=>String(v||'').toLowerCase().includes(search.toLowerCase())))),[convs,filter,search]);
  const visibleContacts=useMemo(()=>availablePeople.filter(p=>!search.trim()||[p.name,p.email,p.clientName,roleLabel(p.role)].some(v=>String(v||'').toLowerCase().includes(search.toLowerCase()))),[availablePeople,search]);
  const visibleMessages=useMemo(()=>!messageSearch.trim()?msgs:msgs.filter(m=>[m.body,m.attachmentName,m.sender?.name].some(v=>String(v||'').toLowerCase().includes(messageSearch.toLowerCase()))),[msgs,messageSearch]);
- const availablePeople=useMemo(()=>people.filter(p=>p.id!==user?.id),[people,user?.id]);
  const presenceById=useMemo(()=>new Map(people.map(p=>[p.id,p.presenceStatus||'OFFLINE'] as const)),[people]);
  const selectedPresence=(selected?.peer?.id?presenceById.get(selected.peer.id):'OFFLINE') as PresenceStatus;
 
