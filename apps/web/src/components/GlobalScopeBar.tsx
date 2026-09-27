@@ -155,7 +155,7 @@ export default function GlobalScopeBar() {
           <label className="relative min-w-0">
             <span className="sr-only">Gerenciador de Negócios</span>
             <BriefcaseBusiness size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <select value={scope.businessId} disabled={scope.tenantLocked || !businesses.length} onChange={(event) => scope.setBusinessId(event.target.value)} className="scope-select h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd] disabled:bg-[#f2f4f2]">
+            <select value={scope.businessId} disabled={!businesses.length || businesses.length === 1} onChange={(event) => scope.setBusinessId(event.target.value)} className="scope-select h-9 w-full min-w-0 rounded-[7px] border border-[#d9e0dc] bg-white pl-8 pr-7 text-[11px] font-medium text-slate-700 outline-none focus:border-[#93c5fd] disabled:bg-[#f2f4f2]">
               {!businesses.length && <option value="">BM não vinculada</option>}
               {businesses.map((business) => <option key={business.id} value={business.metaBusinessId}>{business.name}</option>)}
             </select>
