@@ -79,6 +79,7 @@ export default function CompaniesPro() {
   const [newMetaConnectionRequired, setNewMetaConnectionRequired] = useState(false);
   const [newMetaConnecting, setNewMetaConnecting] = useState(false);
   const [newDirectoryWarning, setNewDirectoryWarning] = useState('');
+  const [newAccountLoading, setNewAccountLoading] = useState<Record<string, boolean>>({});
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState('');
@@ -91,6 +92,7 @@ export default function CompaniesPro() {
   const [editMetaConnectionRequired, setEditMetaConnectionRequired] = useState(false);
   const [editMetaConnecting, setEditMetaConnecting] = useState(false);
   const [editDirectoryWarning, setEditDirectoryWarning] = useState('');
+  const [editAccountLoading, setEditAccountLoading] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
 
   async function load() {
@@ -131,7 +133,7 @@ export default function CompaniesPro() {
     try {
       const response = await api.post('/workspace/business-managers/discover-for-new-client', {});
       const rows = Array.isArray(response.data?.data?.businesses) ? response.data.data.businesses : [];
-      setNewDirectoryWarning(String(response.data?.data?.warning || ''));
+      setNewDirectoryWarning(response.data?.data?.directorySource === 'cache' ? '' : String(response.data?.data?.warning || ''));
       setNewBusinesses(rows.map((item: any) => ({
         businessId: String(item.businessId),
         businessName: String(item.businessName || item.businessId),
@@ -164,17 +166,54 @@ export default function CompaniesPro() {
     }
   }
 
+  async function loadSelectionAccounts(
+    target: 'new' | 'edit',
+    businessId: string,
+    clientId?: string,
+    defaultSelected = false,
+  ) {
+    const setLoadingState = target === 'new' ? setNewAccountLoading : setEditAccountLoading;
+    setLoadingState((current) => ({ ...current, [businessId]: true }));
+    try {
+      const response = await api.post('/workspace/business-managers/accounts-for-selection', {
+        businessId,
+        ...(clientId ? { clientId } : {}),
+      });
+      const rows = Array.isArray(response.data?.data?.accounts) ? response.data.data.accounts : [];
+      const update = target === 'new' ? setNewBusinesses : setEditBusinesses;
+      update((current) => current.map((business) => {
+        if (business.businessId !== businessId) return business;
+        const existing = new Map(business.accounts.map((account) => [account.accountId, account]));
+        return {
+          ...business,
+          accounts: rows.map((account: any) => ({
+            accountId: String(account.accountId),
+            name: String(account.name || account.accountId),
+            currency: account.currency || null,
+            selected: existing.get(String(account.accountId))?.selected ?? defaultSelected,
+          })),
+        };
+      }));
+    } catch {
+      // A BM permanece selecionável; as contas salvas continuam disponíveis.
+    } finally {
+      setLoadingState((current) => ({ ...current, [businessId]: false }));
+    }
+  }
+
   function toggleNewBusiness(businessId: string) {
+    const currentBusiness = newBusinesses.find((business) => business.businessId === businessId);
+    if (!currentBusiness || currentBusiness.available === false) return;
+    const selected = !currentBusiness.selected;
     setNewBusinesses((current) => current.map((business) => {
       if (business.businessId !== businessId) return business;
-      if (business.available === false) return business;
-      const selected = !business.selected;
       return {
         ...business,
         selected,
         accounts: business.accounts.map((account) => ({ ...account, selected })),
       };
     }));
+    if (selected) void loadSelectionAccounts('new', businessId, undefined, true);
   }
 
   function toggleNewAccount(businessId: string, accountId: string) {
@@ -264,7 +303,7 @@ export default function CompaniesPro() {
     try {
       const response = await api.post('/workspace/business-managers/discover-from-meta', { clientId });
       const rows = Array.isArray(response.data?.data?.businesses) ? response.data.data.businesses : [];
-      setEditDirectoryWarning(String(response.data?.data?.warning || ''));
+      setEditDirectoryWarning(response.data?.data?.directorySource === 'cache' ? '' : String(response.data?.data?.warning || ''));
       setEditBusinesses(rows.map((item: any) => ({
         businessId: String(item.businessId),
         businessName: String(item.businessName || item.businessId),
@@ -296,16 +335,18 @@ export default function CompaniesPro() {
   }
 
   function toggleEditBusiness(businessId: string) {
+    const currentBusiness = editBusinesses.find((business) => business.businessId === businessId);
+    if (!currentBusiness || currentBusiness.available === false) return;
+    const selected = !currentBusiness.selected;
     setEditBusinesses((current) => current.map((business) => {
       if (business.businessId !== businessId) return business;
-      if (business.available === false) return business;
-      const selected = !business.selected;
       return {
         ...business,
         selected,
         accounts: business.accounts.map((account) => ({ ...account, selected })),
       };
     }));
+    if (selected) void loadSelectionAccounts('edit', businessId, editing?.id, true);
   }
 
   function toggleEditAccount(businessId: string, accountId: string) {
@@ -505,12 +546,12 @@ export default function CompaniesPro() {
               </span>
             </label>
             {business.selected && <div className="mt-3 space-y-1.5 border-t border-[#e2e7e4] pt-2">
-              <p className="mb-2 text-[10px] font-semibold text-slate-600">Contas autorizadas nesta BM</p>
+              <p className="mb-2 text-[10px] font-semibold text-slate-600">Contas autorizadas nesta BM {newAccountLoading[business.businessId] && <span className="font-normal text-slate-400">· atualizando...</span>}</p>
               {business.accounts.map((account) => <label key={account.accountId} className="flex cursor-pointer items-center gap-2 rounded-[6px] border border-[#e3e8e5] bg-white px-2.5 py-2 text-[10px] text-slate-600">
                 <input type="checkbox" checked={account.selected} onChange={() => toggleNewAccount(business.businessId, account.accountId)} />
                 <span className="min-w-0 flex-1"><strong className="block truncate font-medium text-slate-700">{account.name}</strong><small className="text-slate-400">Conta {account.accountId}{account.currency ? ` · ${account.currency}` : ''}</small></span>
               </label>)}
-              {!business.accounts.length && <p className="text-[10px] text-slate-400">Esta BM não retornou contas de anúncios.</p>}
+              {!business.accounts.length && <p className="text-[10px] text-slate-400">Nenhuma conta disponível nesta BM no momento. A BM pode ser vinculada e as contas serão atualizadas automaticamente.</p>}
             </div>}
           </article>)}
           {!newBusinesses.length && <div className="empty-state corporate-card col-span-full">
@@ -576,7 +617,7 @@ export default function CompaniesPro() {
                 </span>
               </label>
               {business.selected && <div className="mt-3 space-y-1.5 border-t border-[#e2e7e4] pt-2">
-                <p className="mb-2 text-[10px] font-semibold text-slate-600">Contas autorizadas nesta BM</p>
+                <p className="mb-2 text-[10px] font-semibold text-slate-600">Contas autorizadas nesta BM {editAccountLoading[business.businessId] && <span className="font-normal text-slate-400">· atualizando...</span>}</p>
                 {business.accounts.map((account) => <label key={account.accountId} className="flex cursor-pointer items-center gap-2 rounded-[6px] border border-[#e3e8e5] bg-white px-2.5 py-2 text-[10px] text-slate-600">
                   <input type="checkbox" checked={account.selected} onChange={() => toggleEditAccount(business.businessId, account.accountId)} />
                   <span className="min-w-0 flex-1"><strong className="block truncate font-medium text-slate-700">{account.name}</strong><small className="text-slate-400">Conta {account.accountId}{account.currency ? ` · ${account.currency}` : ''}</small></span>

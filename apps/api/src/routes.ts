@@ -585,12 +585,14 @@ export async function registerRoutes(app: FastifyInstance) {
 
       const pendingMessage = discoveryWarning || profileWarning;
       return reply.type('text/html').send(htmlPage(
-        pendingMessage ? 'Meta conectada — sincronização pendente' : 'Meta Ads conectado',
-        pendingMessage
-          ? `A autorização foi salva com segurança. ${pendingMessage} Feche esta janela e volte ao painel; não é necessário autorizar novamente.`
-          : managementConnection
-            ? `A ferramenta foi conectada à Meta com sucesso. Business Managers localizadas: ${businessCount}. Agora vincule cada BM à empresa correta dentro do cadastro.`
-            : `Conexão salva com sucesso. Contas de anúncio localizadas: ${accounts.length}. Você já pode voltar ao painel e atualizar os dados.`,
+        'Meta conectada com sucesso',
+        managementConnection
+          ? (businessCount > 0
+            ? `A ferramenta foi conectada à Meta. Business Managers localizadas: ${businessCount}. Feche esta janela e selecione no cadastro quais BMs pertencem a cada empresa.`
+            : 'A ferramenta foi conectada à Meta. Feche esta janela e volte ao cadastro; a lista completa de BMs será carregada pelo catálogo da ferramenta sem exigir nova autorização.')
+          : pendingMessage
+            ? 'A autorização foi salva com segurança. Feche esta janela e volte ao painel; a sincronização continuará automaticamente.'
+            : `Conexão salva com sucesso. Contas de anúncio localizadas: ${accounts.length}. Você já pode voltar ao painel.`,
       ));
     } catch (error: any) {
       const limited = isMetaRateLimitError(error);
