@@ -153,6 +153,23 @@ model MetaConnection {
   @@index([organizationId, clientId])
 }
 
+model MetaBusinessCatalog {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  connectionId       String?
+  businessId         String
+  businessName       String
+  adminEmail         String?
+  accountsJson       Json?
+  lastSeenAt         DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([organizationId, businessId])
+  @@index([organizationId, businessName])
+  @@index([connectionId])
+}
+
 model GoogleAnalyticsConnection {
   id                    String   @id @default(uuid())
   organizationId        String
