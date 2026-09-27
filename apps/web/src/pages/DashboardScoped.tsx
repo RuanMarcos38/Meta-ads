@@ -297,7 +297,7 @@ export default function DashboardScoped() {
       setNotice('Período sincronizado com a Meta Ads.');
       await Promise.all([loadContext(), loadData(true), loadHistoryStatus()]);
     } catch (requestError: any) {
-      setError(requestError?.response?.data?.message || 'A sincronização não foi concluída. Tente novamente.');
+      setError('A atualização não foi concluída. Tente novamente em instantes.');
     } finally {
       setSyncing(false);
     }
@@ -390,7 +390,7 @@ export default function DashboardScoped() {
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
             <Database size={13} className="text-[#176846]" />
-            <span>Histórico no banco: <strong className="text-slate-700">{dateLabel(history?.earliestDate)} a {dateLabel(history?.latestDate)}</strong></span>
+            <span>Período disponível: <strong className="text-slate-700">{dateLabel(history?.earliestDate)} a {dateLabel(history?.latestDate)}</strong></span>
             <button type="button" onClick={() => { void syncHistory(false); }} disabled={!clientId || historySyncing || assignedAccounts.length === 0} className="h-8 rounded-[7px] border border-[#cfdad3] bg-white px-3 font-semibold text-[#176846] hover:bg-[#f4f7f5] disabled:opacity-50">{historySyncing ? 'Importando histórico...' : 'Importar histórico completo'}</button>
             {isAdmin && <button type="button" onClick={() => { void syncHistory(true); }} disabled={historySyncing} className="h-8 rounded-[7px] border border-[#d8dedb] bg-white px-3 font-semibold text-slate-600 hover:bg-[#f4f6f4] disabled:opacity-50">Todas as empresas</button>}
           </div>

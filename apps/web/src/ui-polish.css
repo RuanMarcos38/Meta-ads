@@ -403,6 +403,38 @@ select.scope-select {
   }
 }
 
+@media (min-width: 1024px) {
+  .app-viewport {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-shell {
+    height: calc(100dvh - 1.5rem);
+    min-height: 0 !important;
+  }
+
+  .app-sidebar,
+  .app-shell > main {
+    min-height: 0;
+  }
+
+  .app-content {
+    min-height: 0;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-bottom: 32px !important;
+    scrollbar-gutter: stable;
+    overscroll-behavior-y: contain;
+  }
+}
+
+@media (min-width: 1280px) {
+  .app-shell {
+    height: calc(100dvh - 2rem);
+  }
+}
+
 @media (max-width: 1023.98px) {
   .app-shell {
     width: 100%;
