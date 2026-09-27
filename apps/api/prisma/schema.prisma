@@ -42,16 +42,26 @@ enum SupportMessageKind {
 }
 
 model Organization {
-  id               String            @id @default(uuid())
-  name             String
-  document         String?
-  email            String?
-  phone             String?
-  users            User[]
-  clients          Client[]
-  businessManagers BusinessManager[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                       String            @id @default(uuid())
+  name                     String
+  document                 String?
+  email                    String?
+  phone                    String?
+  whiteLabelEnabled        Boolean           @default(false)
+  whiteLabelName           String?
+  whiteLabelSubtitle       String?
+  whiteLabelLogoUrl        String?
+  whiteLabelFaviconUrl     String?
+  whiteLabelPrimaryColor   String?
+  whiteLabelSecondaryColor String?
+  whiteLabelSupportEmail   String?
+  whiteLabelSupportPhone   String?
+  whiteLabelDomain         String?           @unique
+  users                    User[]
+  clients                  Client[]
+  businessManagers         BusinessManager[]
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
 }
 
 model User {

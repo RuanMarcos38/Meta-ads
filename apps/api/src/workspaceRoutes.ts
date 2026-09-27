@@ -282,6 +282,103 @@ async function bufferPdf(title: string, period: string, rows: any[]) {
 }
 
 export async function registerWorkspaceRoutes(app: FastifyInstance) {
+  const brandingSelect = {
+    id: true,
+    name: true,
+    whiteLabelEnabled: true,
+    whiteLabelName: true,
+    whiteLabelSubtitle: true,
+    whiteLabelLogoUrl: true,
+    whiteLabelFaviconUrl: true,
+    whiteLabelPrimaryColor: true,
+    whiteLabelSecondaryColor: true,
+    whiteLabelSupportEmail: true,
+    whiteLabelSupportPhone: true,
+    whiteLabelDomain: true,
+  } as const;
+
+  const serializeBranding = (organization: any) => ({
+    enabled: Boolean(organization?.whiteLabelEnabled),
+    name: organization?.whiteLabelEnabled && organization?.whiteLabelName ? organization.whiteLabelName : 'Gestão Ads',
+    subtitle: organization?.whiteLabelEnabled && organization?.whiteLabelSubtitle ? organization.whiteLabelSubtitle : 'R2R Marketing Digital',
+    logoUrl: organization?.whiteLabelEnabled ? organization?.whiteLabelLogoUrl || null : null,
+    faviconUrl: organization?.whiteLabelEnabled ? organization?.whiteLabelFaviconUrl || null : null,
+    primaryColor: organization?.whiteLabelEnabled ? organization?.whiteLabelPrimaryColor || '#2563eb' : '#2563eb',
+    secondaryColor: organization?.whiteLabelEnabled ? organization?.whiteLabelSecondaryColor || '#1e40af' : '#1e40af',
+    supportEmail: organization?.whiteLabelEnabled ? organization?.whiteLabelSupportEmail || organization?.email || null : organization?.email || null,
+    supportPhone: organization?.whiteLabelEnabled ? organization?.whiteLabelSupportPhone || organization?.phone || null : organization?.phone || null,
+    domain: organization?.whiteLabelEnabled ? organization?.whiteLabelDomain || null : null,
+  });
+
+  app.get('/branding/public', async (req) => {
+    const query = z.object({ host: z.string().trim().max(255).optional() }).safeParse(req.query);
+    const host = query.success ? String(query.data.host || '').toLowerCase().split(':')[0] : '';
+    if (!host) return ok(serializeBranding(null));
+    const organization = await prisma.organization.findFirst({
+      where: { whiteLabelEnabled: true, whiteLabelDomain: host },
+      select: brandingSelect,
+    });
+    return ok(serializeBranding(organization));
+  });
+
+  app.get('/workspace/branding', { preHandler: requireAuth() }, async (req, reply) => {
+    const user = req.user as AuthUser;
+    const organization = await prisma.organization.findUnique({
+      where: { id: user.organizationId! },
+      select: brandingSelect,
+    });
+    if (!organization) return reply.code(404).send(fail('ORGANIZATION_NOT_FOUND', 'Organização não encontrada.'));
+    return ok(serializeBranding(organization));
+  });
+
+  app.patch('/workspace/branding', { preHandler: requireAuth([...adminRoles]) }, async (req, reply) => {
+    const user = req.user as AuthUser;
+    const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+    const body = z.object({
+      enabled: z.boolean(),
+      name: z.string().trim().min(2).max(80).nullable().optional(),
+      subtitle: z.string().trim().max(120).nullable().optional(),
+      logoUrl: z.string().trim().url().max(1000).nullable().optional(),
+      faviconUrl: z.string().trim().url().max(1000).nullable().optional(),
+      primaryColor: hex.nullable().optional(),
+      secondaryColor: hex.nullable().optional(),
+      supportEmail: z.string().trim().email().max(180).nullable().optional(),
+      supportPhone: z.string().trim().max(40).nullable().optional(),
+      domain: z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+$/).max(255).nullable().optional(),
+    }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Configuração White Label inválida.'));
+
+    const updated = await prisma.organization.update({
+      where: { id: user.organizationId! },
+      data: {
+        whiteLabelEnabled: body.data.enabled,
+        whiteLabelName: body.data.name || null,
+        whiteLabelSubtitle: body.data.subtitle || null,
+        whiteLabelLogoUrl: body.data.logoUrl || null,
+        whiteLabelFaviconUrl: body.data.faviconUrl || null,
+        whiteLabelPrimaryColor: body.data.primaryColor || null,
+        whiteLabelSecondaryColor: body.data.secondaryColor || null,
+        whiteLabelSupportEmail: body.data.supportEmail || null,
+        whiteLabelSupportPhone: body.data.supportPhone || null,
+        whiteLabelDomain: body.data.domain || null,
+      },
+      select: brandingSelect,
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        organizationId: user.organizationId,
+        userId: user.id,
+        action: 'UPDATE_WHITE_LABEL',
+        entity: 'Organization',
+        entityId: user.organizationId,
+        metadataJson: { enabled: body.data.enabled, domain: body.data.domain || null } as Prisma.InputJsonValue,
+      },
+    }).catch(() => undefined);
+
+    return ok(serializeBranding(updated), 'White Label atualizado.');
+  });
+
   app.get('/workspace/context', { preHandler: requireAuth() }, async (req, reply) => {
     const user = req.user as AuthUser;
     const query = z.object({ clientId: z.string().uuid().optional() }).safeParse(req.query);

@@ -4,6 +4,7 @@ import { BarChart3 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, apiBaseURL } from '../api';
 import { useAuth } from '../store';
+import { applyBranding, defaultBranding, normalizeBranding, type Branding } from '../branding';
 
 const BUILD_ID = '2026.08.29.7';
 
@@ -23,6 +24,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [apiState, setApiState] = useState<ApiState>('checking');
   const [adminReady, setAdminReady] = useState<boolean | null>(null);
+  const [branding, setBranding] = useState<Branding>(defaultBranding);
   const setUser = useAuth((state) => state.setUser);
   const navigate = useNavigate();
 
@@ -31,13 +33,21 @@ export default function Login() {
 
     async function checkApi() {
       try {
-        const [health, status] = await Promise.all([
+        const [health, status, publicBranding] = await Promise.all([
           api.get('/health'),
           api.get('/auth/status'),
+          api.get('/branding/public', { params: { host: window.location.host } }).catch(() => null),
         ]);
         if (!active) return;
         setApiState(health.data?.data?.database === 'connected' ? 'online' : 'database-error');
         setAdminReady(Boolean(status.data?.data?.ready));
+        if (publicBranding?.data?.data) {
+          const next = normalizeBranding(publicBranding.data.data);
+          setBranding(next);
+          applyBranding(next);
+        } else {
+          applyBranding(defaultBranding);
+        }
       } catch (caughtError) {
         if (!active) return;
         if (axios.isAxiosError(caughtError) && caughtError.response?.status === 503) {
@@ -123,12 +133,14 @@ export default function Login() {
           className="w-full rounded-[14px] border border-[#dce3dd] bg-white p-7 shadow-[0_16px_38px_rgba(20,48,34,0.09)] sm:p-8"
         >
           <div className="mb-7 flex items-center gap-3">
-            <span className="grid h-11 w-11 place-items-center rounded-[10px] bg-brand-blue text-white shadow-sm">
-              <BarChart3 size={21} strokeWidth={1.9} />
-            </span>
+            {branding.logoUrl
+              ? <img src={branding.logoUrl} alt={branding.name} className="h-11 w-11 rounded-[10px] object-contain shadow-sm" />
+              : <span className="grid h-11 w-11 place-items-center rounded-[10px] text-white shadow-sm" style={{ backgroundColor: 'var(--brand-primary)' }}>
+                  <BarChart3 size={21} strokeWidth={1.9} />
+                </span>}
             <div>
-              <h1 className="text-xl font-extrabold tracking-[-0.02em] text-[#18231d]">Gestão Ads</h1>
-              <p className="mt-0.5 text-xs font-medium text-slate-500">R2R Marketing Digital</p>
+              <h1 className="text-xl font-extrabold tracking-[-0.02em] text-[#18231d]">{branding.name}</h1>
+              <p className="mt-0.5 text-xs font-medium text-slate-500">{branding.subtitle}</p>
             </div>
           </div>
 
@@ -161,7 +173,8 @@ export default function Login() {
           {error && <p className="mb-3 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p>}
           <button
             disabled={loading || apiState === 'offline' || apiState === 'database-error'}
-            className="h-11 w-full rounded-[9px] bg-brand-blue text-sm font-bold text-white shadow-sm transition-colors hover:bg-brand-purple disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-11 w-full rounded-[9px] text-sm font-bold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ backgroundColor: 'var(--brand-primary)' }}
           >
             {loading ? 'Entrando...' : 'Entrar'}
           </button>
