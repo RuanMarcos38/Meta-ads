@@ -31,6 +31,12 @@ type Client = {
 type Health = { id: string; clientId: string; clientName: string; businessId: string; businessName: string; connected: boolean; tokenStatus: string; assignedAccountCount: number; lastSyncAt?: string | null; lastSyncStatus: string; earliestDate?: string | null; latestDate?: string | null; lastError?: string | null };
 type UserRow = { id: string; name: string; email: string; role: string; clientId?: string | null; businessId?: string | null; isActive: boolean };
 type EditForm = { name: string; companyName: string; document: string; email: string; phone: string; segment: string; status: 'active' | 'inactive' };
+type BusinessChoice = {
+  businessId: string;
+  businessName: string;
+  selected: boolean;
+  accounts: Array<{ accountId: string; name: string; currency?: string | null; selected: boolean }>;
+};
 
 const emptyEditForm: EditForm = {
   name: '',
@@ -64,6 +70,10 @@ export default function CompaniesPro() {
   const [expanded, setExpanded] = useState('');
   const [tab, setTab] = useState<Record<string, string>>({});
   const [name, setName] = useState('');
+  const [newBusinesses, setNewBusinesses] = useState<BusinessChoice[]>([]);
+  const [newBusinessLoaded, setNewBusinessLoaded] = useState(false);
+  const [newBusinessLoading, setNewBusinessLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState('');
   const [savingId, setSavingId] = useState('');
@@ -98,16 +108,87 @@ export default function CompaniesPro() {
 
   useEffect(() => { void load(); }, []);
 
+  async function discoverNewBusinesses() {
+    if (!canAdmin) return;
+    setNewBusinessLoading(true);
+    setError('');
+    try {
+      const response = await api.post('/workspace/business-managers/discover-for-new-client', {});
+      const rows = Array.isArray(response.data?.data?.businesses) ? response.data.data.businesses : [];
+      setNewBusinesses(rows.map((item: any) => ({
+        businessId: String(item.businessId),
+        businessName: String(item.businessName || item.businessId),
+        selected: false,
+        accounts: Array.isArray(item.accounts) ? item.accounts.map((account: any) => ({
+          accountId: String(account.accountId),
+          name: String(account.name || account.accountId),
+          currency: account.currency || null,
+          selected: false,
+        })) : [],
+      })));
+      setNewBusinessLoaded(true);
+      if (!rows.length) setError('Nenhuma Business Manager foi encontrada na conexão Meta disponível.');
+    } catch (err: any) {
+      setNewBusinesses([]);
+      setNewBusinessLoaded(false);
+      setError(err?.response?.data?.error?.message || 'Não foi possível carregar as Business Managers disponíveis.');
+    } finally {
+      setNewBusinessLoading(false);
+    }
+  }
+
+  function toggleNewBusiness(businessId: string) {
+    setNewBusinesses((current) => current.map((business) => {
+      if (business.businessId !== businessId) return business;
+      const selected = !business.selected;
+      return {
+        ...business,
+        selected,
+        accounts: business.accounts.map((account) => ({ ...account, selected })),
+      };
+    }));
+  }
+
+  function toggleNewAccount(businessId: string, accountId: string) {
+    setNewBusinesses((current) => current.map((business) => business.businessId !== businessId ? business : {
+      ...business,
+      accounts: business.accounts.map((account) => account.accountId === accountId ? { ...account, selected: !account.selected } : account),
+    }));
+  }
+
   async function create(e: React.FormEvent) {
     e.preventDefault();
     if (!canAdmin || !name.trim()) return;
+    if (!newBusinessLoaded) {
+      await discoverNewBusinesses();
+      return;
+    }
+
+    const selected = newBusinesses.filter((business) => business.selected);
+    if (!selected.length) {
+      setError('Selecione pelo menos uma Business Manager. A BM é obrigatória no cadastro do cliente.');
+      return;
+    }
+
+    setCreating(true);
+    setError('');
     try {
-      await api.post('/clients', { name: name.trim() });
+      await api.post('/workspace/clients/create-with-business-managers', {
+        name: name.trim(),
+        selections: selected.map((business) => ({
+          businessId: business.businessId,
+          accountIds: business.accounts.filter((account) => account.selected).map((account) => account.accountId),
+        })),
+      });
       setName('');
+      setNewBusinesses([]);
+      setNewBusinessLoaded(false);
       await load();
       window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
     } catch (err: any) {
-      setError(err?.response?.data?.error?.message || 'Não foi possível cadastrar a empresa.');
+      setError(err?.response?.data?.error?.message || 'Não foi possível cadastrar a empresa com as BMs selecionadas.');
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -205,9 +286,46 @@ export default function CompaniesPro() {
 
     {error && <div className="message-warning">{error}</div>}
 
-    {canAdmin && <form onSubmit={create} className="filter-panel flex flex-col gap-2 sm:flex-row">
-      <input className="field-control flex-1" placeholder="Nome da nova empresa" value={name} onChange={(e) => setName(e.target.value)} required />
-      <button className="primary-button"><Plus size={14} />Cadastrar empresa</button>
+    {canAdmin && <form onSubmit={create} className="filter-panel">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input className="field-control flex-1" placeholder="Nome da nova empresa" value={name} onChange={(e) => setName(e.target.value)} required />
+        <button className="primary-button" disabled={newBusinessLoading || creating}>
+          {newBusinessLoading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+          {newBusinessLoading ? 'Carregando BMs...' : newBusinessLoaded ? (creating ? 'Cadastrando...' : 'Cadastrar empresa') : 'Continuar: escolher BM'}
+        </button>
+      </div>
+
+      {newBusinessLoaded && <div className="mt-4 border-t border-[#e1e6e3] pt-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="panel-title">Business Manager obrigatória</h2>
+            <p className="panel-subtitle">Selecione uma ou mais BMs que pertencem a esta empresa. O cliente verá somente as BMs cadastradas aqui.</p>
+          </div>
+          <button type="button" className="secondary-button" onClick={() => { void discoverNewBusinesses(); }} disabled={newBusinessLoading}>
+            <RefreshCw size={13} className={newBusinessLoading ? 'animate-spin' : ''} />Atualizar BMs
+          </button>
+        </div>
+        <div className="grid gap-3 xl:grid-cols-2">
+          {newBusinesses.map((business) => <article key={business.businessId} className={`rounded-[8px] border p-3 ${business.selected ? 'border-blue-200 bg-blue-50/40' : 'border-[#dfe5e2] bg-white'}`}>
+            <label className="flex cursor-pointer items-start gap-2">
+              <input className="mt-1" type="checkbox" checked={business.selected} onChange={() => toggleNewBusiness(business.businessId)} />
+              <span className="min-w-0">
+                <strong className="block text-[12px] font-semibold text-slate-700">{business.businessName}</strong>
+                <small className="block text-[10px] text-slate-500">ID {business.businessId} · {business.accounts.length} conta{business.accounts.length === 1 ? '' : 's'}</small>
+              </span>
+            </label>
+            {business.selected && <div className="mt-3 space-y-1.5 border-t border-[#e2e7e4] pt-2">
+              <p className="mb-2 text-[10px] font-semibold text-slate-600">Contas autorizadas nesta BM</p>
+              {business.accounts.map((account) => <label key={account.accountId} className="flex cursor-pointer items-center gap-2 rounded-[6px] border border-[#e3e8e5] bg-white px-2.5 py-2 text-[10px] text-slate-600">
+                <input type="checkbox" checked={account.selected} onChange={() => toggleNewAccount(business.businessId, account.accountId)} />
+                <span className="min-w-0 flex-1"><strong className="block truncate font-medium text-slate-700">{account.name}</strong><small className="text-slate-400">Conta {account.accountId}{account.currency ? ` · ${account.currency}` : ''}</small></span>
+              </label>)}
+              {!business.accounts.length && <p className="text-[10px] text-slate-400">Esta BM não retornou contas de anúncios.</p>}
+            </div>}
+          </article>)}
+          {!newBusinesses.length && <div className="empty-state corporate-card col-span-full"><BriefcaseBusiness size={18} /><span>Nenhuma BM disponível para vincular.</span></div>}
+        </div>
+      </div>}
     </form>}
 
     {canAdmin && editing && <section className="corporate-card p-4 edit-company-panel">
