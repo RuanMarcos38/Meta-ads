@@ -307,7 +307,16 @@ async function getFinancialAccountWithFallback(
         const graph = await getFinancialAccountGraph(path, token);
         const data = graph.data;
         const currency = String(data?.currency || currencyHint || 'BRL').toUpperCase();
-        const displayedBalance = resolveDisplayedBalance(data, currency);
+        const liveDisplayedBalance = resolveDisplayedBalance(data, currency);
+      const displayedBalance = liveDisplayedBalance.value != null
+        ? liveDisplayedBalance
+        : financial.balanceSnapshot
+          ? {
+              value: financial.balanceSnapshot.value,
+              label: financial.balanceSnapshot.label,
+              source: 'last_confirmed_meta_balance',
+            }
+          : liveDisplayedBalance;
 
         const liveSnapshot: ConfirmedBalanceSnapshot | null = displayedBalance.value == null
           ? null
@@ -451,10 +460,20 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           account.connection,
           user.organizationId!,
           client.id,
+          account.id,
         );
         const data = financial.data;
         const liveCurrency = String(data?.currency || currency).toUpperCase();
-        const displayedBalance = resolveDisplayedBalance(data, liveCurrency);
+        const liveDisplayedBalance = resolveDisplayedBalance(data, liveCurrency);
+        const displayedBalance = liveDisplayedBalance.value != null
+          ? liveDisplayedBalance
+          : financial.balanceSnapshot
+            ? {
+                value: financial.balanceSnapshot.value,
+                label: financial.balanceSnapshot.label,
+                source: 'last_confirmed_meta_balance',
+              }
+            : liveDisplayedBalance;
         return {
           id: account.id,
           accountId: String(data?.account_id || account.accountId).replace(/^act_/, ''),
@@ -466,6 +485,9 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           balance: displayedBalance.value,
           balanceLabel: displayedBalance.label,
           balanceSource: displayedBalance.source,
+          balanceConfirmedAt: financial.balanceSnapshot?.confirmedAt || financial.fetchedAt,
+          balanceFromCache: financial.fromCache || displayedBalance.source === 'last_confirmed_meta_balance',
+          rateLimited: financial.rateLimited,
           amountDue: minorToMajor(data?.balance, liveCurrency),
           amountSpent: minorToMajor(data?.amount_spent, liveCurrency),
           spendCap: minorToMajor(data?.spend_cap, liveCurrency),
@@ -506,7 +528,7 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
       totalsByCurrency: Array.from(totalsByCurrency.values()),
       source: 'Meta Marketing API',
       updatedAt: new Date().toISOString(),
-      refreshRecommendedSeconds: 60,
+      refreshRecommendedSeconds: 300,
     });
   });
 
@@ -538,6 +560,7 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
         account.connection,
         user.organizationId!,
         client.id,
+        account.id,
       );
       const token = financial.token;
       const data = financial.data;
@@ -589,6 +612,9 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           balance: displayedBalance.value,
           balanceLabel: displayedBalance.label,
           balanceSource: displayedBalance.source,
+          balanceConfirmedAt: financial.balanceSnapshot?.confirmedAt || financial.fetchedAt,
+          balanceFromCache: financial.fromCache || displayedBalance.source === 'last_confirmed_meta_balance',
+          rateLimited: financial.rateLimited,
           amountDue: minorToMajor(data?.balance, currency),
           amountSpent: minorToMajor(data?.amount_spent, currency),
           spendCap: minorToMajor(data?.spend_cap, currency),
