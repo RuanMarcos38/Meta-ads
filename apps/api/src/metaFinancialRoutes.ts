@@ -134,40 +134,97 @@ function isGraphRateLimit(error: any) {
   const code = Number(error?.response?.data?.error?.code);
   const status = Number(error?.response?.status || 0);
   const message = graphError(error).toLowerCase();
-  return status === 429 || [4, 17, 32, 613].includes(code) || message.includes('request limit') || message.includes('rate limit');
+  return status === 429
+    || [4, 17, 32, 613, 80004].includes(code)
+    || message.includes('request limit')
+    || message.includes('rate limit')
+    || message.includes('too many calls');
+}
+
+type ConfirmedBalanceSnapshot = {
+  value: number;
+  currency: string;
+  label: string;
+  source: string;
+  confirmedAt: string;
+};
+
+type FinancialFetchResult = {
+  data: any;
+  token: string;
+  connectionId: string;
+  fetchedAt: string;
+  fromCache: boolean;
+  rateLimited: boolean;
+  balanceSnapshot: ConfirmedBalanceSnapshot | null;
+};
+
+const FINANCIAL_CACHE_TTL_MS = 2 * 60 * 1000;
+const FINANCIAL_RATE_LIMIT_BACKOFF_MS = 5 * 60 * 1000;
+const financialCache = new Map<string, FinancialFetchResult>();
+const financialInflight = new Map<string, Promise<FinancialFetchResult>>();
+const financialRateLimitedUntil = new Map<string, number>();
+
+async function readConfirmedBalanceSnapshot(
+  organizationId: string,
+  accountDbId: string,
+): Promise<ConfirmedBalanceSnapshot | null> {
+  const latest = await prisma.auditLog.findFirst({
+    where: {
+      organizationId,
+      action: 'META_FINANCIAL_BALANCE_SNAPSHOT',
+      entity: 'MetaAdAccount',
+      entityId: accountDbId,
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { metadataJson: true, createdAt: true },
+  });
+  const metadata = latest?.metadataJson as any;
+  const value = Number(metadata?.value);
+  if (!Number.isFinite(value)) return null;
+  return {
+    value,
+    currency: String(metadata?.currency || 'BRL').toUpperCase(),
+    label: String(metadata?.label || 'Fundos disponíveis'),
+    source: String(metadata?.source || 'meta_confirmed_snapshot'),
+    confirmedAt: String(metadata?.confirmedAt || latest?.createdAt?.toISOString() || new Date().toISOString()),
+  };
+}
+
+async function persistConfirmedBalanceSnapshot(
+  organizationId: string,
+  accountDbId: string,
+  snapshot: ConfirmedBalanceSnapshot,
+) {
+  const previous = await readConfirmedBalanceSnapshot(organizationId, accountDbId);
+  const previousTime = previous ? new Date(previous.confirmedAt).getTime() : 0;
+  const unchanged = previous
+    && previous.value === snapshot.value
+    && previous.currency === snapshot.currency
+    && previous.source === snapshot.source;
+  if (unchanged && Date.now() - previousTime < 10 * 60 * 1000) return;
+
+  await prisma.auditLog.create({
+    data: {
+      organizationId,
+      action: 'META_FINANCIAL_BALANCE_SNAPSHOT',
+      entity: 'MetaAdAccount',
+      entityId: accountDbId,
+      metadataJson: snapshot,
+    },
+  });
 }
 
 async function getFinancialAccountGraph(path: string, token: string) {
-  // A consulta base contém somente campos que não devem derrubar o painel inteiro
-  // quando uma permissão financeira opcional não está disponível.
-  let merged = await getGraph(path, token, { fields: BASE_FINANCIAL_FIELDS });
+  const base = await getGraph(path, token, { fields: BASE_FINANCIAL_FIELDS });
+  let merged = base;
+  let rateLimited = false;
 
-  // Campos de cobrança/permissão são consultados isoladamente. Uma recusa da Meta
-  // não pode apagar gasto, status, moeda ou demais dados que já foram lidos.
-  for (const fields of ['stored_balance_status', 'user_tasks', 'funding_source_details']) {
-    try {
-      const extra = await getGraph(path, token, { fields });
-      merged = { ...merged, ...extra };
-    } catch (error: any) {
-      if (isGraphRateLimit(error)) break;
-    }
+  if (!Boolean(base?.is_prepay_account)) {
+    return { data: merged, rateLimited };
   }
 
-  const isPrepay = Boolean(merged?.is_prepay_account)
-    || String(merged?.stored_balance_status || '').toLowerCase() === 'prepay';
-  if (!isPrepay) return merged;
-
-  // A forma total_prepay_balance.fields(amount) é suportada pela Graph API.
-  // Mantemos fallbacks independentes para evitar que um campo opcional invalide
-  // toda a consulta financeira.
-  const currencyAmountFields = 'amount,amount_in_hundredths,currency,offsetted_amount';
   const optionalFieldSets = [
-    'total_prepay_balance.fields(amount)',
-    'prepay_account_balance.fields(amount)',
-    'total_prepay_balance{amount}',
-    'prepay_account_balance{amount}',
-    `total_prepay_balance.fields(${currencyAmountFields})`,
-    `prepay_account_balance.fields(${currencyAmountFields})`,
     'total_prepay_balance',
     'prepay_account_balance',
   ];
@@ -177,14 +234,16 @@ async function getFinancialAccountGraph(path: string, token: string) {
       const extra = await getGraph(path, token, { fields });
       merged = { ...merged, ...extra };
       const liveCurrency = String(merged?.currency || 'BRL').toUpperCase();
-      const resolved = resolveDisplayedBalance(merged, liveCurrency);
-      if (resolved.value != null) return merged;
+      if (resolveDisplayedBalance(merged, liveCurrency).value != null) break;
     } catch (error: any) {
-      if (isGraphRateLimit(error)) break;
+      if (isGraphRateLimit(error)) {
+        rateLimited = true;
+        break;
+      }
     }
   }
 
-  return merged;
+  return { data: merged, rateLimited };
 }
 
 type FinancialConnectionCandidate = {
@@ -199,60 +258,118 @@ async function getFinancialAccountWithFallback(
   primaryConnection: FinancialConnectionCandidate,
   organizationId: string,
   clientId: string,
-) {
-  const alternatives = await prisma.metaConnection.findMany({
-    where: {
-      organizationId,
-      status: 'active',
-      OR: [
-        { clientId },
-        { clientId: null },
-      ],
-    },
-    orderBy: { updatedAt: 'desc' },
-    take: 6,
-    select: {
-      id: true,
-      status: true,
-      accessTokenEncrypted: true,
-    },
-  });
+  accountDbId: string,
+): Promise<FinancialFetchResult> {
+  const cacheKey = `${organizationId}:${path}`;
+  const now = Date.now();
+  const cached = financialCache.get(cacheKey);
 
-  const candidates = [primaryConnection, ...alternatives]
-    .filter((connection, index, all) =>
-      connection.status === 'active'
-      && all.findIndex((item) => item.id === connection.id) === index);
-
-  let firstSuccessful: { data: any; token: string; connectionId: string } | null = null;
-  let lastError: any = null;
-
-  for (const connection of candidates) {
-    try {
-      const token = decrypt(connection.accessTokenEncrypted);
-      const data = await getFinancialAccountGraph(path, token);
-      const currency = String(data?.currency || currencyHint || 'BRL').toUpperCase();
-      const displayedBalance = resolveDisplayedBalance(data, currency);
-      const isPrepay = Boolean(data?.is_prepay_account)
-        || String(data?.stored_balance_status || '').toLowerCase() === 'prepay';
-
-      if (!firstSuccessful) {
-        firstSuccessful = { data, token, connectionId: connection.id };
-      }
-
-      // Para pós-pago, a primeira resposta válida já é suficiente. Para pré-pago,
-      // continuamos tentando somente conexões já autorizadas da mesma organização
-      // até encontrar um CurrencyAmount real retornado pela Meta.
-      if (!isPrepay || displayedBalance.value != null) {
-        return { data, token, connectionId: connection.id };
-      }
-    } catch (error: any) {
-      lastError = error;
-      if (isGraphRateLimit(error)) break;
-    }
+  if (cached && now - new Date(cached.fetchedAt).getTime() < FINANCIAL_CACHE_TTL_MS) {
+    return { ...cached, fromCache: true };
   }
 
-  if (firstSuccessful) return firstSuccessful;
-  throw lastError || new Error('Nenhuma conexão Meta ativa conseguiu consultar a conta de anúncios.');
+  const inflight = financialInflight.get(cacheKey);
+  if (inflight) return inflight;
+
+  const blockedUntil = financialRateLimitedUntil.get(cacheKey) || 0;
+  if (blockedUntil > now && cached) {
+    return { ...cached, fromCache: true, rateLimited: true };
+  }
+
+  const task = (async (): Promise<FinancialFetchResult> => {
+    const alternatives = await prisma.metaConnection.findMany({
+      where: {
+        organizationId,
+        status: 'active',
+        OR: [{ clientId }, { clientId: null }],
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 2,
+      select: {
+        id: true,
+        status: true,
+        accessTokenEncrypted: true,
+      },
+    });
+
+    const candidates = [primaryConnection, ...alternatives]
+      .filter((connection, index, all) =>
+        connection.status === 'active'
+        && all.findIndex((item) => item.id === connection.id) === index)
+      .slice(0, 2);
+
+    let firstSuccessful: FinancialFetchResult | null = null;
+    let lastError: any = null;
+
+    for (const connection of candidates) {
+      try {
+        const token = decrypt(connection.accessTokenEncrypted);
+        const graph = await getFinancialAccountGraph(path, token);
+        const data = graph.data;
+        const currency = String(data?.currency || currencyHint || 'BRL').toUpperCase();
+        const displayedBalance = resolveDisplayedBalance(data, currency);
+
+        const liveSnapshot: ConfirmedBalanceSnapshot | null = displayedBalance.value == null
+          ? null
+          : {
+              value: displayedBalance.value,
+              currency,
+              label: displayedBalance.label,
+              source: displayedBalance.source,
+              confirmedAt: new Date().toISOString(),
+            };
+
+        if (graph.rateLimited) {
+          financialRateLimitedUntil.set(cacheKey, Date.now() + FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+        }
+
+        const persistedSnapshot = liveSnapshot
+          || await readConfirmedBalanceSnapshot(organizationId, accountDbId);
+
+        if (liveSnapshot) {
+          await persistConfirmedBalanceSnapshot(organizationId, accountDbId, liveSnapshot);
+        }
+
+        const result: FinancialFetchResult = {
+          data,
+          token,
+          connectionId: connection.id,
+          fetchedAt: new Date().toISOString(),
+          fromCache: false,
+          rateLimited: graph.rateLimited,
+          balanceSnapshot: persistedSnapshot,
+        };
+
+        financialCache.set(cacheKey, result);
+        if (!firstSuccessful) firstSuccessful = result;
+
+        const isPrepay = Boolean(data?.is_prepay_account);
+        if (!isPrepay || liveSnapshot) return result;
+
+        // Resposta base real já recebida. Não insistimos com várias chamadas/tokens
+        // no mesmo ciclo porque isso pode bloquear a leitura financeira da conta.
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        if (isGraphRateLimit(error)) {
+          financialRateLimitedUntil.set(cacheKey, Date.now() + FINANCIAL_RATE_LIMIT_BACKOFF_MS);
+          if (cached) return { ...cached, fromCache: true, rateLimited: true };
+          break;
+        }
+      }
+    }
+
+    if (firstSuccessful) return firstSuccessful;
+    if (cached) return { ...cached, fromCache: true, rateLimited: isGraphRateLimit(lastError) };
+    throw lastError || new Error('Nenhuma conexão Meta ativa conseguiu consultar a conta de anúncios.');
+  })();
+
+  financialInflight.set(cacheKey, task);
+  try {
+    return await task;
+  } finally {
+    financialInflight.delete(cacheKey);
+  }
 }
 
 async function getPagedGraph(path: string, token: string, params: Record<string, unknown>) {
@@ -334,10 +451,20 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           account.connection,
           user.organizationId!,
           client.id,
+          account.id,
         );
         const data = financial.data;
         const liveCurrency = String(data?.currency || currency).toUpperCase();
-        const displayedBalance = resolveDisplayedBalance(data, liveCurrency);
+        const liveDisplayedBalance = resolveDisplayedBalance(data, liveCurrency);
+        const displayedBalance = liveDisplayedBalance.value != null
+          ? liveDisplayedBalance
+          : financial.balanceSnapshot
+            ? {
+                value: financial.balanceSnapshot.value,
+                label: financial.balanceSnapshot.label,
+                source: 'last_confirmed_meta_balance',
+              }
+            : liveDisplayedBalance;
         return {
           id: account.id,
           accountId: String(data?.account_id || account.accountId).replace(/^act_/, ''),
@@ -349,6 +476,9 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           balance: displayedBalance.value,
           balanceLabel: displayedBalance.label,
           balanceSource: displayedBalance.source,
+          balanceConfirmedAt: financial.balanceSnapshot?.confirmedAt || financial.fetchedAt,
+          balanceFromCache: financial.fromCache || displayedBalance.source === 'last_confirmed_meta_balance',
+          rateLimited: financial.rateLimited,
           amountDue: minorToMajor(data?.balance, liveCurrency),
           amountSpent: minorToMajor(data?.amount_spent, liveCurrency),
           spendCap: minorToMajor(data?.spend_cap, liveCurrency),
@@ -367,7 +497,10 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           businessName: account.businessName,
           currency,
           available: false,
-          error: graphError(error),
+          rateLimited: isGraphRateLimit(error),
+          error: isGraphRateLimit(error)
+            ? 'A Meta limitou temporariamente as consultas desta conta. O sistema aguardará a janela segura e tentará novamente sem duplicar chamadas.'
+            : 'A Meta não liberou os dados financeiros desta conta nesta consulta.',
         };
       }
     }));
@@ -389,7 +522,7 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
       totalsByCurrency: Array.from(totalsByCurrency.values()),
       source: 'Meta Marketing API',
       updatedAt: new Date().toISOString(),
-      refreshRecommendedSeconds: 60,
+      refreshRecommendedSeconds: 300,
     });
   });
 
@@ -421,11 +554,21 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
         account.connection,
         user.organizationId!,
         client.id,
+        account.id,
       );
       const token = financial.token;
       const data = financial.data;
       const currency = String(data?.currency || account.currency || 'BRL').toUpperCase();
-      const displayedBalance = resolveDisplayedBalance(data, currency);
+      const liveDisplayedBalance = resolveDisplayedBalance(data, currency);
+      const displayedBalance = liveDisplayedBalance.value != null
+        ? liveDisplayedBalance
+        : financial.balanceSnapshot
+          ? {
+              value: financial.balanceSnapshot.value,
+              label: financial.balanceSnapshot.label,
+              source: 'last_confirmed_meta_balance',
+            }
+          : liveDisplayedBalance;
       const rawAccountId = String(data?.account_id || account.accountId).replace(/^act_/, '');
       const businessId = account.businessId || query.data.businessId || null;
 
@@ -472,6 +615,9 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           balance: displayedBalance.value,
           balanceLabel: displayedBalance.label,
           balanceSource: displayedBalance.source,
+          balanceConfirmedAt: financial.balanceSnapshot?.confirmedAt || financial.fetchedAt,
+          balanceFromCache: financial.fromCache || displayedBalance.source === 'last_confirmed_meta_balance',
+          rateLimited: financial.rateLimited,
           amountDue: minorToMajor(data?.balance, currency),
           amountSpent: minorToMajor(data?.amount_spent, currency),
           spendCap: minorToMajor(data?.spend_cap, currency),

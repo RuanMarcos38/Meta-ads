@@ -71,7 +71,7 @@ export default function BillingPayments(){
     }finally{setActivityLoading(false);}
   }
 
-  useEffect(()=>{void load();void loadActivity();},[scope.clientId,scope.businessId,selectedAccountId]);
+  useEffect(()=>{void load();},[scope.clientId,scope.businessId,selectedAccountId]);
 
   const account=data?.account;
   const funding=data?.paymentProfile?.currentFundingSource||account?.fundingSource;
@@ -82,7 +82,7 @@ export default function BillingPayments(){
   return <div className="space-y-4">
     <section className="page-heading">
       <div><p className="section-kicker">Financeiro</p><h1>Cobrança e pagamentos</h1><p>Consulte saldo, forma de pagamento e movimentações da conta selecionada.</p></div>
-      <button className="secondary-button" onClick={()=>{void load();void loadActivity();}} disabled={loading||activityLoading}><RefreshCw size={13} className={loading||activityLoading?'animate-spin':''}/>Atualizar</button>
+      <button className="secondary-button" onClick={()=>{void load();}} disabled={loading}><RefreshCw size={13} className={loading?'animate-spin':''}/>Atualizar</button>
     </section>
 
     {error&&<div className="message-warning">{error}</div>}
