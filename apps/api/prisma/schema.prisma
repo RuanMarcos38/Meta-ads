@@ -440,11 +440,13 @@ model SupportPresence {
   userId         String   @id
   organizationId String
   clientId       String?
+  status         String   @default("ONLINE")
   lastSeenAt     DateTime @updatedAt
   createdAt      DateTime @default(now())
 
   @@index([organizationId, lastSeenAt])
   @@index([clientId, lastSeenAt])
+  @@index([organizationId, status, lastSeenAt])
 }
 
 model AuditLog {
