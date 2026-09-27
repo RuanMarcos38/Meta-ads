@@ -3,7 +3,7 @@ import { Circle, FileText, Headphones, MessageCircle, Mic, Paperclip, Plus, Sear
 import { api } from '../api';
 import { useAuth } from '../store';
 
-type Person={id:string;name:string;email:string;role:string;clientId?:string|null;clientName?:string|null;lastSeenAt?:string};
+type Person={id:string;name:string;email:string;role:string;clientId?:string|null;clientName?:string|null;lastSeenAt?:string|null;presenceStatus?:'ONLINE'|'AWAY';online?:boolean};
 type Conv={id:string;createdById:string;assignedToId?:string|null;type:'CHAT'|'TICKET';status:'OPEN'|'PENDING'|'RESOLVED'|'CLOSED';subject?:string|null;priority:string;lastMessageAt:string;requester?:Person|null;assignedTo?:Person|null;peer?:Person|null;lastMessage?:{body?:string|null;attachmentName?:string|null;createdAt:string}|null;unread?:boolean;slaMinutes?:number;slaBreached?:boolean};
 type Msg={id:string;senderId:string;kind:'TEXT'|'FILE'|'AUDIO'|'SYSTEM';body?:string|null;attachmentName?:string|null;attachmentMime?:string|null;attachmentSize?:number|null;createdAt:string;sender?:Person|null};
 type Attachment={name:string;mime:string;dataBase64:string;kind:'FILE'|'AUDIO';size:number};
@@ -19,7 +19,8 @@ export default function SupportPro(){
  const admin=['SUPER_ADMIN','AGENCY_ADMIN'].includes(user?.role||'');
  const[convs,setConvs]=useState<Conv[]>([]);
  const[msgs,setMsgs]=useState<Msg[]>([]);
- const[online,setOnline]=useState<Person[]>([]);
+ const[people,setPeople]=useState<Person[]>([]);
+ const[ownStatus,setOwnStatus]=useState<'ONLINE'|'AWAY'>(()=>localStorage.getItem('supportPresenceStatus')==='AWAY'?'AWAY':'ONLINE');
  const[selectedId,setSelectedId]=useState('');
  const[filter,setFilter]=useState<'ALL'|'CHAT'|'TICKET'>('ALL');
  const[search,setSearch]=useState('');
@@ -59,10 +60,17 @@ export default function SupportPro(){
   }catch(e:any){setError(e?.response?.data?.error?.message||'Não foi possível carregar mensagens.');}
  }
 
- async function heartbeat(){
-  await api.post('/support/presence').catch(()=>undefined);
+ async function heartbeat(statusOverride?:'ONLINE'|'AWAY'){
+  const currentStatus=statusOverride||(localStorage.getItem('supportPresenceStatus')==='AWAY'?'AWAY':'ONLINE');
+  await api.post('/support/presence',{status:currentStatus}).catch(()=>undefined);
   const r=await api.get('/support/presence').catch(()=>null);
-  setOnline(Array.isArray(r?.data?.data)?r.data.data:[]);
+  setPeople(Array.isArray(r?.data?.data)?r.data.data:[]);
+ }
+
+ async function changeOwnStatus(next:'ONLINE'|'AWAY'){
+  setOwnStatus(next);
+  localStorage.setItem('supportPresenceStatus',next);
+  await heartbeat(next);
  }
 
  useEffect(()=>{
@@ -87,9 +95,11 @@ export default function SupportPro(){
  useEffect(()=>{bottom.current?.scrollIntoView({behavior:'smooth'});},[msgs.length]);
 
  const visible=useMemo(()=>convs.filter(c=>(filter==='ALL'||c.type===filter)&&(!search.trim()||[c.subject,c.peer?.name,c.peer?.email,c.requester?.name,c.requester?.email,c.lastMessage?.body].some(v=>String(v||'').toLowerCase().includes(search.toLowerCase())))),[convs,filter,search]);
- const availablePeople=useMemo(()=>online.filter(p=>p.id!==user?.id),[online,user?.id]);
- const onlineIds=useMemo(()=>new Set(online.map(p=>p.id)),[online]);
- const selectedOnline=Boolean(selected?.peer?.id&&onlineIds.has(selected.peer.id));
+ const availablePeople=useMemo(()=>people.filter(p=>p.id!==user?.id),[people,user?.id]);
+ const presenceById=useMemo(()=>new Map(people.map(p=>[p.id,p.presenceStatus||'AWAY'] as const)),[people]);
+ const selectedPresence=selected?.peer?.id?presenceById.get(selected.peer.id)||'AWAY':'AWAY';
+ const onlineCount=people.filter(p=>p.presenceStatus==='ONLINE').length;
+ const awayCount=people.filter(p=>p.presenceStatus!=='ONLINE').length;
 
  async function openDirect(person:Person){
   if(person.id===user?.id)return;
