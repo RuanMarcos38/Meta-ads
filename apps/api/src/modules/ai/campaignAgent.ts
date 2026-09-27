@@ -710,6 +710,32 @@ async function buildAiAdminReport(organizationId: string, date: string) {
   const context = await organizationReportContext(organizationId);
   if (!env.ai.apiKey) return fallbackAdminReport(context, date);
 
+  const visualCandidates = context
+    .filter((item) => item.attentionCount > 0)
+    .slice(0, 4);
+  const creativeReviews: any[] = [];
+  const images: string[] = [];
+
+  for (const item of visualCandidates) {
+    const client = await prisma.client.findFirst({
+      where: { organizationId, name: item.client, status: 'active' },
+      select: { id: true },
+    });
+    if (!client) continue;
+    try {
+      const creative = await creativeContext(organizationId, client.id);
+      creativeReviews.push({
+        client: item.client,
+        creatives: creative.details.slice(0, 2),
+      });
+      for (const image of creative.images) {
+        if (images.length < 4) images.push(image);
+      }
+    } catch {
+      // A análise de métricas continua mesmo se um criativo não puder ser carregado na Meta.
+    }
+  }
+
   const prompt = [
     `Data local: ${date}`,
     'Produza um relatório executivo diário PRIVADO para o administrador da agência.',
@@ -717,17 +743,21 @@ async function buildAiAdminReport(organizationId: string, date: string) {
     'Pense como gestor de tráfego sênior de alta performance: destaque risco, oportunidade, provável causa e ação prioritária.',
     'Use no máximo 3 pontos por cliente e finalize com as 5 prioridades gerais do dia.',
     'Se uma causa não puder ser comprovada pelos dados, trate como hipótese e diga o que verificar.',
-    'Se CTR/frequência sugerirem desgaste, mencione revisão de criativo. Se houver bom desempenho, destaque o que preservar.',
+    'Para os criativos fornecidos, faça análise visual quando houver imagem: clareza, oferta, hierarquia, legibilidade, adequação ao objetivo e relação com CTR/frequência.',
+    'Não chame um criativo de ruim apenas por CTR baixo; diferencie evidência visual, hipótese de público/oferta e problema de entrega.',
     'Texto para WhatsApp, direto, profissional, sem tabelas, até 3.800 caracteres.',
     '',
+    'Carteira de campanhas:',
     JSON.stringify(context, null, 2),
-  ].join('\n');
+    creativeReviews.length ? '\nCriativos carregados diretamente da Meta para revisão:\n' + JSON.stringify(creativeReviews, null, 2) : '',
+  ].filter(Boolean).join('\n');
 
   try {
     return await callOpenAI({
-      system: 'Você é um gestor de tráfego sênior responsável pela análise privada de uma carteira de clientes. Seja técnico, criterioso e objetivo.',
+      system: 'Você é um gestor de tráfego sênior responsável pela análise privada de uma carteira de clientes. Seja técnico, criterioso, orientado a evidências e objetivo.',
       user: prompt,
-      maxOutputTokens: 1300,
+      images,
+      maxOutputTokens: 1500,
     });
   } catch {
     return fallbackAdminReport(context, date);
@@ -738,31 +768,40 @@ async function sendDailyAdminReport(logger: FastifyBaseLogger) {
   const clock = saoPauloClock();
   if (clock.hour < env.ai.dailyReportHour) return;
 
-  const organizations = await prisma.organization.findMany({ select: { id: true } });
-  for (const organization of organizations) {
-    try {
-      const text = await buildAiAdminReport(organization.id, clock.date);
-      const delivery = await sendWhatsAppOncePerDay({
-        organizationId: organization.id,
-        clientId: organization.id,
-        phone: env.ai.adminWhatsapp,
-        text,
-        reason: 'AI_ADMIN_DAILY_REPORT',
+  const platformAdmin = await prisma.user.findFirst({
+    where: {
+      role: 'SUPER_ADMIN',
+      isActive: true,
+      organizationId: { not: null },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { organizationId: true },
+  });
+  const organizationId = platformAdmin?.organizationId;
+  if (!organizationId) return;
+
+  try {
+    const text = await buildAiAdminReport(organizationId, clock.date);
+    const delivery = await sendWhatsAppOncePerDay({
+      organizationId,
+      clientId: organizationId,
+      phone: env.ai.adminWhatsapp,
+      text,
+      reason: 'AI_ADMIN_DAILY_REPORT',
+    });
+    if (delivery.sent) {
+      await prisma.auditLog.create({
+        data: {
+          organizationId,
+          action: 'AI_ADMIN_DAILY_REPORT_SENT',
+          entity: 'Organization',
+          entityId: organizationId,
+          metadataJson: { date: clock.date, phone: env.ai.adminWhatsapp, privateAdminOnly: true },
+        },
       });
-      if (delivery.sent) {
-        await prisma.auditLog.create({
-          data: {
-            organizationId: organization.id,
-            action: 'AI_ADMIN_DAILY_REPORT_SENT',
-            entity: 'Organization',
-            entityId: organization.id,
-            metadataJson: { date: clock.date, phone: env.ai.adminWhatsapp },
-          },
-        });
-      }
-    } catch (error) {
-      logger.error({ err: error, organizationId: organization.id }, 'Falha ao enviar relatório diário privado da IA.');
     }
+  } catch (error) {
+    logger.error({ err: error, organizationId }, 'Falha ao enviar relatório diário privado da IA.');
   }
 }
 
