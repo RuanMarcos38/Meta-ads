@@ -12,6 +12,9 @@ type FinancialAccount = {
   currency: string;
   accountStatus?: number | null;
   balance?: number;
+  balanceLabel?: string;
+  balanceSource?: string;
+  amountDue?: number;
   amountSpent?: number;
   spendCap?: number;
   isPrepayAccount?: boolean;
@@ -140,12 +143,13 @@ export default function FinancialStatusBar() {
     : oneCurrency
       ? money(oneCurrency.amountSpent, oneCurrency.currency)
       : '—';
+  const balanceLabel = selected?.balanceLabel || 'Saldo Meta';
 
   return <div className="border-b border-[#e1e6e3] bg-[#fbfcfb] px-3 py-2 sm:px-4 md:px-5">
     <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-[10px]">
       <div className="flex items-center gap-2">
         <span className="grid h-7 w-7 place-items-center rounded-[6px] bg-emerald-50 text-emerald-700"><WalletCards size={14}/></span>
-        <span><small className="block text-[8px] font-semibold uppercase tracking-[0.08em] text-slate-400">Saldo Meta</small><strong className="tabular-nums text-[12px] text-slate-800">{loading ? 'Atualizando...' : balanceText}</strong></span>
+        <span><small className="block text-[8px] font-semibold uppercase tracking-[0.08em] text-slate-400">{balanceLabel}</small><strong className="tabular-nums text-[12px] text-slate-800">{loading ? 'Atualizando...' : balanceText}</strong></span>
       </div>
       <div><small className="block text-[8px] font-semibold uppercase tracking-[0.08em] text-slate-400">Gasto acumulado da conta</small><strong className="tabular-nums text-[11px] text-slate-700">{spentText}</strong></div>
       {selected && <div className="min-w-0"><small className="block text-[8px] font-semibold uppercase tracking-[0.08em] text-slate-400">Conta acompanhada</small><strong className="block max-w-[260px] truncate text-[10px] text-slate-700">{selected.name} · {selected.businessName || 'Meta'}</strong></div>}
@@ -164,7 +168,7 @@ export default function FinancialStatusBar() {
         <div className="premium-scrollbar max-h-[220px] overflow-auto rounded-[7px] border border-[#e1e6e3] bg-white">
           {accounts.map((account) => <button key={account.id} onClick={() => setActivityAccountId(account.id)} className={`grid w-full grid-cols-[1fr_auto] gap-3 border-b border-[#edf0ee] px-3 py-2 text-left last:border-0 ${activityAccountId === account.id ? 'bg-[#eff6ff]' : 'hover:bg-[#fafbfa]'}`}>
             <span className="min-w-0"><strong className="block truncate text-[10px] text-slate-700">{account.name}</strong><small className="block truncate text-[8px] text-slate-400">{account.businessName || 'Meta'} · conta {account.accountId}</small>{!account.available && <small className="block text-[8px] text-amber-700">{account.error || 'Saldo indisponível'}</small>}</span>
-            <span className="text-right"><strong className="block tabular-nums text-[10px] text-slate-700">{account.available ? money(account.balance, account.currency) : '—'}</strong><small className="block text-[8px] text-slate-400">saldo</small></span>
+            <span className="text-right"><strong className="block tabular-nums text-[10px] text-slate-700">{account.available ? money(account.balance, account.currency) : '—'}</strong><small className="block text-[8px] text-slate-400">{account.balanceLabel || 'saldo'}</small></span>
           </button>)}
           {!accounts.length && <div className="p-3 text-[9px] text-slate-400">Nenhuma conta Meta atribuída a este escopo.</div>}
         </div>

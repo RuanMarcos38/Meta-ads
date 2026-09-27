@@ -49,6 +49,48 @@ function minorToMajor(value: unknown, currency: string) {
   return numeric / (ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) ? 1 : 100);
 }
 
+function currencyAmountToMajor(value: any, fallbackCurrency: string): number | null {
+  if (value == null) return null;
+  if (typeof value === 'number' || typeof value === 'string') {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  if (typeof value !== 'object') return null;
+
+  const hundredths = Number(value.amount_in_hundredths);
+  if (Number.isFinite(hundredths)) return hundredths / 100;
+
+  const amount = Number(value.amount);
+  if (Number.isFinite(amount)) return amount;
+
+  const offsetted = Number(value.offsetted_amount);
+  if (Number.isFinite(offsetted)) return offsetted;
+
+  return null;
+}
+
+export function resolveDisplayedBalance(data: any, currency: string) {
+  const isPrepay = Boolean(data?.is_prepay_account) || String(data?.stored_balance_status || '').toLowerCase() === 'prepay';
+
+  if (isPrepay) {
+    const totalPrepay = currencyAmountToMajor(data?.total_prepay_balance, currency);
+    if (totalPrepay != null) {
+      return { value: totalPrepay, label: 'Fundos disponíveis', source: 'total_prepay_balance' };
+    }
+
+    const fundedPrepay = currencyAmountToMajor(data?.prepay_account_balance, currency);
+    if (fundedPrepay != null) {
+      return { value: fundedPrepay, label: 'Fundos disponíveis', source: 'prepay_account_balance' };
+    }
+  }
+
+  return {
+    value: minorToMajor(data?.balance, currency),
+    label: isPrepay ? 'Fundos disponíveis' : 'Saldo a pagar',
+    source: 'balance',
+  };
+}
+
 function parseExtraData(value: unknown) {
   if (!value) return null;
   if (typeof value === 'object') return value;
@@ -154,9 +196,10 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
         const token = decrypt(account.connection.accessTokenEncrypted);
         const actId = String(account.accountId).startsWith('act_') ? String(account.accountId) : `act_${account.accountId}`;
         const data = await getGraph(actId, token, {
-          fields: 'id,account_id,name,currency,account_status,amount_spent,balance,spend_cap,funding_source_details,is_prepay_account,timezone_name',
+          fields: 'id,account_id,name,currency,account_status,amount_spent,balance,spend_cap,funding_source_details,is_prepay_account,stored_balance_status,prepay_account_balance{amount,amount_in_hundredths,currency},total_prepay_balance{amount,amount_in_hundredths,currency},timezone_name',
         });
         const liveCurrency = String(data?.currency || currency).toUpperCase();
+        const displayedBalance = resolveDisplayedBalance(data, liveCurrency);
         return {
           id: account.id,
           accountId: String(data?.account_id || account.accountId).replace(/^act_/, ''),
@@ -165,7 +208,10 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           businessName: account.businessName,
           currency: liveCurrency,
           accountStatus: data?.account_status == null ? account.accountStatus : Number(data.account_status),
-          balance: minorToMajor(data?.balance, liveCurrency),
+          balance: displayedBalance.value,
+          balanceLabel: displayedBalance.label,
+          balanceSource: displayedBalance.source,
+          amountDue: minorToMajor(data?.balance, liveCurrency),
           amountSpent: minorToMajor(data?.amount_spent, liveCurrency),
           spendCap: minorToMajor(data?.spend_cap, liveCurrency),
           isPrepayAccount: Boolean(data?.is_prepay_account),
@@ -234,9 +280,10 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
       const token = decrypt(account.connection.accessTokenEncrypted);
       const actId = String(account.accountId).startsWith('act_') ? String(account.accountId) : `act_${account.accountId}`;
       const data = await getGraph(actId, token, {
-        fields: 'id,account_id,name,currency,account_status,amount_spent,balance,spend_cap,funding_source_details,is_prepay_account,timezone_name',
+        fields: 'id,account_id,name,currency,account_status,amount_spent,balance,spend_cap,funding_source_details,is_prepay_account,stored_balance_status,prepay_account_balance{amount,amount_in_hundredths,currency},total_prepay_balance{amount,amount_in_hundredths,currency},timezone_name',
       });
       const currency = String(data?.currency || account.currency || 'BRL').toUpperCase();
+      const displayedBalance = resolveDisplayedBalance(data, currency);
       const rawAccountId = String(data?.account_id || account.accountId).replace(/^act_/, '');
       const businessId = account.businessId || query.data.businessId || null;
 
@@ -280,7 +327,10 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           businessName: account.businessName,
           currency,
           accountStatus: data?.account_status == null ? account.accountStatus : Number(data.account_status),
-          balance: minorToMajor(data?.balance, currency),
+          balance: displayedBalance.value,
+          balanceLabel: displayedBalance.label,
+          balanceSource: displayedBalance.source,
+          amountDue: minorToMajor(data?.balance, currency),
           amountSpent: minorToMajor(data?.amount_spent, currency),
           spendCap: minorToMajor(data?.spend_cap, currency),
           isPrepayAccount: Boolean(data?.is_prepay_account),
