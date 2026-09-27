@@ -84,9 +84,17 @@ export function resolveDisplayedBalance(data: any, currency: string) {
     }
   }
 
+  if (isPrepay) {
+    return {
+      value: null,
+      label: 'Fundos disponíveis',
+      source: 'unavailable',
+    };
+  }
+
   return {
     value: minorToMajor(data?.balance, currency),
-    label: isPrepay ? 'Fundos disponíveis' : 'Saldo a pagar',
+    label: 'Saldo a pagar',
     source: 'balance',
   };
 }
@@ -107,6 +115,50 @@ async function getGraph(path: string, token: string, params: Record<string, unkn
     timeout: 20_000,
   });
   return response.data;
+}
+
+const BASE_FINANCIAL_FIELDS = [
+  'id',
+  'account_id',
+  'name',
+  'currency',
+  'account_status',
+  'amount_spent',
+  'balance',
+  'spend_cap',
+  'funding_source_details',
+  'is_prepay_account',
+  'timezone_name',
+].join(',');
+
+function isGraphRateLimit(error: any) {
+  const code = Number(error?.response?.data?.error?.code);
+  const status = Number(error?.response?.status || 0);
+  const message = graphError(error).toLowerCase();
+  return status === 429 || [4, 17, 32, 613].includes(code) || message.includes('request limit') || message.includes('rate limit');
+}
+
+async function getFinancialAccountGraph(path: string, token: string) {
+  const base = await getGraph(path, token, { fields: BASE_FINANCIAL_FIELDS });
+  if (!base?.is_prepay_account) return base;
+
+  const optionalFieldSets = [
+    'stored_balance_status,prepay_account_balance,total_prepay_balance',
+    'prepay_account_balance,total_prepay_balance',
+    'total_prepay_balance',
+    'prepay_account_balance',
+  ];
+
+  for (const fields of optionalFieldSets) {
+    try {
+      const extra = await getGraph(path, token, { fields });
+      return { ...base, ...extra };
+    } catch (error: any) {
+      if (isGraphRateLimit(error)) break;
+    }
+  }
+
+  return base;
 }
 
 async function getPagedGraph(path: string, token: string, params: Record<string, unknown>) {
@@ -195,9 +247,7 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
       try {
         const token = decrypt(account.connection.accessTokenEncrypted);
         const actId = String(account.accountId).startsWith('act_') ? String(account.accountId) : `act_${account.accountId}`;
-        const data = await getGraph(actId, token, {
-          fields: 'id,account_id,name,currency,account_status,amount_spent,balance,spend_cap,funding_source_details,is_prepay_account,stored_balance_status,prepay_account_balance{amount,amount_in_hundredths,currency},total_prepay_balance{amount,amount_in_hundredths,currency},timezone_name',
-        });
+        const data = await getFinancialAccountGraph(actId, token);
         const liveCurrency = String(data?.currency || currency).toUpperCase();
         const displayedBalance = resolveDisplayedBalance(data, liveCurrency);
         return {
@@ -279,9 +329,7 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
     try {
       const token = decrypt(account.connection.accessTokenEncrypted);
       const actId = String(account.accountId).startsWith('act_') ? String(account.accountId) : `act_${account.accountId}`;
-      const data = await getGraph(actId, token, {
-        fields: 'id,account_id,name,currency,account_status,amount_spent,balance,spend_cap,funding_source_details,is_prepay_account,stored_balance_status,prepay_account_balance{amount,amount_in_hundredths,currency},total_prepay_balance{amount,amount_in_hundredths,currency},timezone_name',
-      });
+      const data = await getFinancialAccountGraph(actId, token);
       const currency = String(data?.currency || account.currency || 'BRL').toUpperCase();
       const displayedBalance = resolveDisplayedBalance(data, currency);
       const rawAccountId = String(data?.account_id || account.accountId).replace(/^act_/, '');

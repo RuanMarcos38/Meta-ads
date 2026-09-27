@@ -32,6 +32,17 @@ describe('resolveDisplayedBalance', () => {
     });
   });
 
+  it('não usa balance como fundos disponíveis quando a conta é pré-paga', () => {
+    expect(resolveDisplayedBalance({
+      is_prepay_account: true,
+      balance: '6688',
+    }, 'BRL')).toEqual({
+      value: null,
+      label: 'Fundos disponíveis',
+      source: 'unavailable',
+    });
+  });
+
   it('mantém balance como saldo a pagar em conta pós-paga', () => {
     expect(resolveDisplayedBalance({
       is_prepay_account: false,

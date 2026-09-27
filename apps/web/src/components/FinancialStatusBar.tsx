@@ -11,7 +11,7 @@ type FinancialAccount = {
   businessName?: string | null;
   currency: string;
   accountStatus?: number | null;
-  balance?: number;
+  balance?: number | null;
   balanceLabel?: string;
   balanceSource?: string;
   amountDue?: number;
@@ -132,7 +132,7 @@ export default function FinancialStatusBar() {
   const totals = data?.totalsByCurrency || [];
   const oneCurrency = totals.length === 1 ? totals[0] : null;
   const balanceText = selected
-    ? money(selected.balance, selected.currency)
+    ? (selected.balance == null ? 'Indisponível' : money(selected.balance, selected.currency))
     : oneCurrency
       ? money(oneCurrency.balance, oneCurrency.currency)
       : totals.length > 1
@@ -168,7 +168,7 @@ export default function FinancialStatusBar() {
         <div className="premium-scrollbar max-h-[220px] overflow-auto rounded-[7px] border border-[#e1e6e3] bg-white">
           {accounts.map((account) => <button key={account.id} onClick={() => setActivityAccountId(account.id)} className={`grid w-full grid-cols-[1fr_auto] gap-3 border-b border-[#edf0ee] px-3 py-2 text-left last:border-0 ${activityAccountId === account.id ? 'bg-[#eff6ff]' : 'hover:bg-[#fafbfa]'}`}>
             <span className="min-w-0"><strong className="block truncate text-[10px] text-slate-700">{account.name}</strong><small className="block truncate text-[8px] text-slate-400">{account.businessName || 'Meta'} · conta {account.accountId}</small>{!account.available && <small className="block text-[8px] text-amber-700">{account.error || 'Saldo indisponível'}</small>}</span>
-            <span className="text-right"><strong className="block tabular-nums text-[10px] text-slate-700">{account.available ? money(account.balance, account.currency) : '—'}</strong><small className="block text-[8px] text-slate-400">{account.balanceLabel || 'saldo'}</small></span>
+            <span className="text-right"><strong className="block tabular-nums text-[10px] text-slate-700">{account.available ? (account.balance == null ? 'Indisponível' : money(account.balance, account.currency)) : '—'}</strong><small className="block text-[8px] text-slate-400">{account.balanceLabel || 'saldo'}</small></span>
           </button>)}
           {!accounts.length && <div className="p-3 text-[9px] text-slate-400">Nenhuma conta Meta atribuída a este escopo.</div>}
         </div>
