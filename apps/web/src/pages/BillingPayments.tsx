@@ -20,7 +20,17 @@ type PaymentCenter={
     isPrepayAccount:boolean;fundingSource?:{type?:string|null;displayString?:string|null;lastFourDigits?:string|null;expiration?:string|null}|null;
   };
   metaFinancialCapabilities:{
+    apiVersion:string;
+    connectionId:string;
+    connectionStatus:string;
+    tokenExpiresAt?:string|null;
+    oauthScopes:string[];
     businessId?:string|null;
+    accountFinancialRead:boolean;
+    fundingSourceReadable:boolean;
+    creditCardsReadable:boolean;
+    extendedCreditsReadable:boolean;
+    ready:boolean;
     paymentSourcesReadable:boolean;
     businessCreditCards:Array<{id?:string|null;name:string;status?:string|null;displayString?:string|null;expiration?:string|null}>;
     extendedCredits:Array<{id?:string|null;name:string;legalEntityName?:string|null;maxBalance?:unknown;onlineMaxBalance?:unknown;owned:boolean}>;
@@ -95,6 +105,7 @@ export default function BillingPayments(){
   const fundingText=funding?.displayString||funding?.type||(funding?.lastFourDigits?`Final ${funding.lastFourDigits}`:'Nenhuma forma identificada pela integração Meta');
   const creditCards=data?.metaFinancialCapabilities.businessCreditCards||[];
   const credits=data?.metaFinancialCapabilities.extendedCredits||[];
+  const financialApi=data?.metaFinancialCapabilities;
 
   return <div className="space-y-4">
     <section className="page-heading">
@@ -103,6 +114,27 @@ export default function BillingPayments(){
     </section>
 
     {error&&<div className="message-warning">{error}</div>}
+
+    {data&&<section className="corporate-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex gap-3">
+          <span className={`metric-icon ${financialApi?.ready?'text-emerald-700':'text-amber-700'}`}><ShieldCheck size={15}/></span>
+          <div>
+            <h2 className="panel-title">API financeira da Meta</h2>
+            <p className="panel-subtitle">A mesma conexão Meta já existente é reutilizada. Nenhuma credencial do projeto foi substituída.</p>
+          </div>
+        </div>
+        <span className={`status-chip ${financialApi?.ready?'status-success':'status-warning'}`}>{financialApi?.ready?'Conectada':'Permissões incompletas'}</span>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mini-stat"><span>Graph API</span><strong>{financialApi?.apiVersion||'—'}</strong><small>Meta Marketing API</small></div>
+        <div className="mini-stat"><span>Conta financeira</span><strong>{financialApi?.accountFinancialRead?'Leitura ativa':'Indisponível'}</strong><small>Saldo, gasto e funding source</small></div>
+        <div className="mini-stat"><span>Cartões da BM</span><strong>{financialApi?.creditCardsReadable?'API autorizada':'Não liberado'}</strong><small>{creditCards.length} fonte(s) retornada(s)</small></div>
+        <div className="mini-stat"><span>Crédito Meta</span><strong>{financialApi?.extendedCreditsReadable?'API autorizada':'Não liberado'}</strong><small>{credits.length} linha(s) retornada(s)</small></div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">{(financialApi?.oauthScopes||[]).map(scopeName=><span key={scopeName} className="status-chip status-neutral">{scopeName}</span>)}</div>
+      {!!financialApi?.capabilityErrors?.length&&<div className="message-warning mt-3">A conexão principal está preservada, mas a Meta não liberou todos os recursos financeiros desta BM: {financialApi.capabilityErrors.join(' | ')}</div>}
+    </section>}
 
     {!selectedAccountId&&<section className="corporate-card p-5"><div className="empty-state"><CreditCard size={22}/><span>Selecione uma conta de anúncios no cabeçalho para consultar cobrança e pagamentos da Meta.</span></div></section>}
 
