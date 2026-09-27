@@ -7,6 +7,13 @@ import { handleSupportMessageWithAi } from './modules/ai/campaignAgent.js';
 
 const adminRoles = new Set(['SUPER_ADMIN', 'AGENCY_ADMIN']);
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const presenceStatuses = ['ONLINE', 'WORKING', 'BUSY', 'BREAK', 'AWAY', 'DND'] as const;
+type PresenceStatus = typeof presenceStatuses[number];
+
+function resolvedPresenceStatus(status: string | null | undefined, heartbeatActive: boolean): PresenceStatus | 'OFFLINE' {
+  if (!heartbeatActive) return 'OFFLINE';
+  return presenceStatuses.includes(status as PresenceStatus) ? status as PresenceStatus : 'ONLINE';
+}
 
 const conversationCreateSchema = z.object({
   type: z.enum(['CHAT', 'TICKET']).default('CHAT'),
@@ -111,7 +118,7 @@ export async function registerSupportRoutes(app: FastifyInstance) {
   app.post('/support/presence', { preHandler: requireAuth() }, async (req, reply) => {
     const user = req.user as AuthUser;
     const body = z.object({
-      status: z.enum(['ONLINE', 'AWAY']).default('ONLINE'),
+      status: z.enum(presenceStatuses).default('ONLINE'),
     }).safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send(fail('VALIDATION', 'Status de atendimento inválido.'));
 
@@ -130,7 +137,7 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       },
     });
     return ok({
-      online: body.data.status === 'ONLINE',
+      online: ['ONLINE', 'WORKING', 'BUSY'].includes(body.data.status),
       status: body.data.status,
       at: presence.lastSeenAt,
     });
@@ -174,7 +181,7 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       .map((item) => {
         const presence = presenceById.get(item.id);
         const heartbeatActive = Boolean(presence?.lastSeenAt && presence.lastSeenAt >= activeSince);
-        const presenceStatus = presence?.status === 'AWAY' || !heartbeatActive ? 'AWAY' : 'ONLINE';
+        const presenceStatus = resolvedPresenceStatus(presence?.status, heartbeatActive);
         return {
           id: item.id,
           name: item.name,
@@ -184,12 +191,13 @@ export async function registerSupportRoutes(app: FastifyInstance) {
           clientName: item.client?.name ?? null,
           lastSeenAt: presence?.lastSeenAt ?? null,
           presenceStatus,
-          online: presenceStatus === 'ONLINE',
+          online: ['ONLINE', 'WORKING', 'BUSY'].includes(presenceStatus),
         };
       })
       .sort((a, b) => {
-        const aOnline = a.presenceStatus === 'ONLINE' ? 0 : 1;
-        const bOnline = b.presenceStatus === 'ONLINE' ? 0 : 1;
+        const activeStatuses = new Set(['ONLINE', 'WORKING', 'BUSY']);
+        const aOnline = activeStatuses.has(a.presenceStatus) ? 0 : 1;
+        const bOnline = activeStatuses.has(b.presenceStatus) ? 0 : 1;
         const aAdmin = adminRoles.has(a.role) ? 0 : 1;
         const bAdmin = adminRoles.has(b.role) ? 0 : 1;
         return aOnline - bOnline || aAdmin - bAdmin || a.name.localeCompare(b.name);
