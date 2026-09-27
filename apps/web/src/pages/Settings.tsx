@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { applyBranding, defaultBranding, normalizeBranding, type Branding } from '../branding';
 import { useAuth, useScope } from '../store';
+import PwaInstallCard from '../components/PwaInstallCard';
 
 export default function Settings(){
   const navigate=useNavigate();
@@ -64,6 +65,8 @@ export default function Settings(){
           <p className="mt-1 text-[10px] leading-4 text-slate-500">{description}</p>
         </button>)}
     </section>
+
+    <PwaInstallCard />
 
     {admin&&<form onSubmit={saveBranding} className="corporate-card p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
