@@ -363,6 +363,52 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // META OAUTH
+  app.get('/meta/management-status', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req) => {
+    const u = req.user as AuthUser;
+    const connection = await prisma.metaConnection.findFirst({
+      where: { organizationId: u.organizationId!, clientId: null, status: 'active' },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        metaUserId: true,
+        tokenExpiresAt: true,
+        scopes: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    return ok({
+      connected: Boolean(connection),
+      connection,
+      mode: 'organization',
+    });
+  });
+
+  app.get('/meta/oauth/start-management', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
+    if (!metaConfigurationReady()) return metaConfigFailure(reply);
+
+    const u = req.user as AuthUser;
+    const state = app.jwt.sign({
+      type: 'meta_management_oauth',
+      userId: u.id,
+      organizationId: u.organizationId,
+    }, { expiresIn: '10m' });
+
+    const authUrl = new URL(`https://www.facebook.com/${env.meta.apiVersion}/dialog/oauth`);
+    authUrl.searchParams.set('client_id', env.meta.appId);
+    authUrl.searchParams.set('redirect_uri', env.meta.redirectUri);
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('scope', META_OAUTH_SCOPES.join(','));
+
+    return ok({
+      authUrl: authUrl.toString(),
+      scopes: META_OAUTH_SCOPES,
+      mode: 'organization',
+    });
+  });
+
   app.get('/meta/oauth/start', { preHandler: requireAuth(['SUPER_ADMIN', 'AGENCY_ADMIN']) }, async (req, reply) => {
     if (!metaConfigurationReady()) return metaConfigFailure(reply);
 
@@ -432,7 +478,9 @@ export async function registerRoutes(app: FastifyInstance) {
         organizationId?: string;
         clientId?: string;
       };
-      if (state.type !== 'meta_oauth' || !state.organizationId || !state.clientId) {
+      const managementConnection = state.type === 'meta_management_oauth';
+      const clientConnection = state.type === 'meta_oauth' && Boolean(state.clientId);
+      if (!state.organizationId || !state.userId || (!managementConnection && !clientConnection)) {
         throw new Error('Estado OAuth inválido.');
       }
 
@@ -478,14 +526,15 @@ export async function registerRoutes(app: FastifyInstance) {
           : 'A conexão foi salva, mas a identificação do usuário Meta ficou pendente.';
       }
 
+      const connectionClientId = managementConnection ? null : state.clientId!;
       await prisma.metaConnection.updateMany({
-        where: { organizationId: state.organizationId, clientId: state.clientId, status: 'active' },
+        where: { organizationId: state.organizationId, clientId: connectionClientId, status: 'active' },
         data: { status: 'replaced' },
       });
       const connection = await prisma.metaConnection.create({
         data: {
           organizationId: state.organizationId,
-          clientId: state.clientId,
+          clientId: connectionClientId,
           metaUserId,
           accessTokenEncrypted: encrypt(tokenPayload.access_token),
           tokenExpiresAt,
@@ -495,43 +544,48 @@ export async function registerRoutes(app: FastifyInstance) {
       });
 
       let accounts: any[] = [];
+      let businessCount = 0;
       let discoveryWarning: string | null = null;
       try {
         const meta = new MetaAdsService(tokenPayload.access_token);
-        accounts = await meta.adAccounts();
-        for (const account of accounts) {
-          const existing = await prisma.metaAdAccount.findFirst({
-            where: {
-              organizationId: state.organizationId,
-              clientId: state.clientId,
-              accountId: String(account.account_id),
-            },
-          });
-          const data = {
-            name: account.name,
-            currency: account.currency,
-            timezone: account.timezone_name,
-            accountStatus: account.account_status ? Number(account.account_status) : null,
-            connectionId: connection.id,
-            isActive: true,
-          };
-          if (existing) {
-            await prisma.metaAdAccount.update({ where: { id: existing.id }, data });
-          } else {
-            await prisma.metaAdAccount.create({
-              data: {
+        if (managementConnection) {
+          businessCount = (await meta.businessDirectory()).length;
+        } else {
+          accounts = await meta.adAccounts();
+          for (const account of accounts) {
+            const existing = await prisma.metaAdAccount.findFirst({
+              where: {
                 organizationId: state.organizationId,
-                clientId: state.clientId,
+                clientId: state.clientId!,
                 accountId: String(account.account_id),
-                ...data,
               },
             });
+            const data = {
+              name: account.name,
+              currency: account.currency,
+              timezone: account.timezone_name,
+              accountStatus: account.account_status ? Number(account.account_status) : null,
+              connectionId: connection.id,
+              isActive: true,
+            };
+            if (existing) {
+              await prisma.metaAdAccount.update({ where: { id: existing.id }, data });
+            } else {
+              await prisma.metaAdAccount.create({
+                data: {
+                  organizationId: state.organizationId,
+                  clientId: state.clientId!,
+                  accountId: String(account.account_id),
+                  ...data,
+                },
+              });
+            }
           }
         }
       } catch (error: any) {
         discoveryWarning = isMetaRateLimitError(error)
-          ? 'A Meta atingiu o limite temporário de requisições. A autorização foi preservada e as contas/BMs poderão ser atualizadas depois, sem reconectar.'
-          : 'A autorização foi preservada, mas a descoberta de contas ficou pendente para a próxima atualização.';
+          ? 'A Meta atingiu o limite temporário de requisições. A autorização foi preservada e as BMs poderão ser atualizadas depois, sem reconectar.'
+          : 'A autorização foi preservada, mas a descoberta de BMs/contas ficou pendente para a próxima atualização.';
       }
 
       await prisma.auditLog.create({
@@ -542,7 +596,10 @@ export async function registerRoutes(app: FastifyInstance) {
           entity: 'MetaConnection',
           entityId: connection.id,
           metadataJson: {
+            mode: managementConnection ? 'organization' : 'client',
+            clientId: connectionClientId,
             accountCount: accounts.length,
+            businessCount,
             profilePending: Boolean(profileWarning),
             discoveryPending: Boolean(discoveryWarning),
             warning: discoveryWarning || profileWarning || null,
@@ -555,7 +612,9 @@ export async function registerRoutes(app: FastifyInstance) {
         pendingMessage ? 'Meta conectada — sincronização pendente' : 'Meta Ads conectado',
         pendingMessage
           ? `A autorização foi salva com segurança. ${pendingMessage} Feche esta janela e volte ao painel; não é necessário autorizar novamente.`
-          : `Conexão salva com sucesso. Contas de anúncio localizadas: ${accounts.length}. Você já pode voltar ao painel e atualizar os dados.`,
+          : managementConnection
+            ? `A ferramenta foi conectada à Meta com sucesso. Business Managers localizadas: ${businessCount}. Agora vincule cada BM à empresa correta dentro do cadastro.`
+            : `Conexão salva com sucesso. Contas de anúncio localizadas: ${accounts.length}. Você já pode voltar ao painel e atualizar os dados.`,
       ));
     } catch (error: any) {
       const limited = isMetaRateLimitError(error);
