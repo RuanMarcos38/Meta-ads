@@ -242,6 +242,8 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
 
       let businessCreditCards: any[] = [];
       let extendedCredits: any[] = [];
+      let creditCardsReadable = false;
+      let extendedCreditsReadable = false;
       const capabilityErrors: string[] = [];
       if (businessId) {
         try {
@@ -249,6 +251,7 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
             fields: 'id,name,status,display_string,expiration',
             limit: '100',
           });
+          creditCardsReadable = true;
         } catch (error: any) {
           capabilityErrors.push(`creditcards: ${graphError(error)}`);
         }
@@ -257,6 +260,7 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
             fields: 'id,legal_entity_name,max_balance,online_max_balance,is_owned_credit_line,owner_business,name',
             limit: '100',
           });
+          extendedCreditsReadable = true;
         } catch (error: any) {
           capabilityErrors.push(`extendedcredits: ${graphError(error)}`);
         }
@@ -280,7 +284,16 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           timezone: data?.timezone_name || account.timezone || null,
         },
         metaFinancialCapabilities: {
+          apiVersion: env.meta.apiVersion,
+          connectionId: account.connection.id,
+          connectionStatus: account.connection.status,
+          tokenExpiresAt: account.connection.tokenExpiresAt || null,
+          oauthScopes: String(account.connection.scopes || '').split(',').map((item) => item.trim()).filter(Boolean),
           businessId,
+          accountFinancialRead: true,
+          fundingSourceReadable: true,
+          creditCardsReadable,
+          extendedCreditsReadable,
           paymentSourcesReadable: true,
           businessCreditCards: businessCreditCards.map((item: any) => ({
             id: item?.id || null,
@@ -299,14 +312,17 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           })),
           hasExtendedCredit: extendedCredits.length > 0,
           capabilityErrors,
+          ready: account.connection.status === 'active'
+            && String(account.connection.scopes || '').includes('ads_management')
+            && String(account.connection.scopes || '').includes('business_management'),
         },
         supportedInPlatform: {
           readBalance: true,
           readSpend: true,
           readFundingSourceSummary: true,
           readBillingActivity: true,
-          readBusinessCreditCards: businessCreditCards.length > 0,
-          readExtendedCredit: extendedCredits.length > 0,
+          readBusinessCreditCards: creditCardsReadable,
+          readExtendedCredit: extendedCreditsReadable,
           createMetaPixDirectly: false,
           createMetaBoletoDirectly: false,
           addMetaPaymentMethodDirectly: false,
