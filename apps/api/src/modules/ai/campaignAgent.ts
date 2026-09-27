@@ -351,7 +351,7 @@ export function wantsHumanHandoff(text: string) {
   return [
     /falar com (o |a )?(gestor|humano|atendente|pessoa|especialista)/,
     /quero (um |uma )?(gestor|humano|atendente|pessoa)/,
-    /me passa (pro|para o|para a) (gestor|humano|atendente)/,
+    /me passa (pro|pra|para)( o| a| um| uma)? (gestor|humano|atendente|pessoa|especialista)/,
     /chama (o |a )?(gestor|humano|atendente)/,
     /preciso (do|da|de um|de uma) (gestor|humano|atendente)/,
     /não quero (falar com )?(a )?i[.a]?/,
@@ -368,7 +368,7 @@ async function fetchImageAsDataUrl(url?: string | null) {
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 12_000,
-      maxContentLength: 6 * 1024 * 1024,
+      maxContentLength: 2 * 1024 * 1024,
     });
     const type = String(response.headers['content-type'] || 'image/jpeg').split(';')[0];
     if (!type.startsWith('image/')) return null;
@@ -434,7 +434,7 @@ async function creativeContext(organizationId: string, clientId: string) {
       try {
         const meta = new MetaAdsService(decrypt(ad.adSet.campaign.adAccount.connection.accessTokenEncrypted));
         creative = await meta.creativeDetails(ad.creativeId);
-        const dataUrl = await fetchImageAsDataUrl(creative?.image_url || creative?.thumbnail_url);
+        const dataUrl = await fetchImageAsDataUrl(creative?.thumbnail_url || creative?.image_url);
         if (dataUrl && images.length < 2) images.push(dataUrl);
       } catch {
         creative = null;
@@ -753,12 +753,13 @@ async function buildAiAdminReport(organizationId: string, date: string) {
   ].filter(Boolean).join('\n');
 
   try {
-    return await callOpenAI({
+    const generated = await callOpenAI({
       system: 'Você é um gestor de tráfego sênior responsável pela análise privada de uma carteira de clientes. Seja técnico, criterioso, orientado a evidências e objetivo.',
       user: prompt,
       images,
       maxOutputTokens: 1500,
     });
+    return generated.slice(0, 3900);
   } catch {
     return fallbackAdminReport(context, date);
   }
