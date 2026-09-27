@@ -14,7 +14,7 @@ const dateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const tenantRoles = new Set(['CLIENT', 'MANAGER']);
 
 function businessScope(user: AuthUser, requested?: string) {
-  if (tenantRoles.has(user.role)) return user.businessId || '__NO_BUSINESS__';
+  if (tenantRoles.has(user.role)) return requested || user.businessId || '__NO_BUSINESS__';
   return requested;
 }
 
