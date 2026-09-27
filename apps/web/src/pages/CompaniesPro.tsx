@@ -519,8 +519,7 @@ export default function CompaniesPro() {
             <button type="button" className="secondary-button" onClick={() => { void connectManagementForCompanies(); }} disabled={newMetaConnecting}>
               <Link2 size={13} />{newMetaConnecting ? 'Reconectando...' : 'Reconectar ferramenta à Meta'}
             </button>
-            </div>
-          </>}
+          </div>}
         </div>
       </div>}
     </form>}
@@ -597,7 +596,8 @@ export default function CompaniesPro() {
                 </button>
               </div>
             </div>}
-          </div>}
+            </div>
+          </>}
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">
