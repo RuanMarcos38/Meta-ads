@@ -160,18 +160,85 @@ export class MetaAdsService {
   }
 
   async businessDirectory(): Promise<MetaBusinessDirectoryItem[]> {
-    const businesses = await getPaged(`${BASE()}/me/businesses`, {
-      access_token: this.accessToken,
-      fields: 'id,name',
-      limit: '100',
-    });
+    const businessMap = new Map<string, {
+      businessId: string;
+      businessName: string;
+      accounts: Map<string, MetaBusinessAdAccount>;
+    }>();
+
+    const ensureBusiness = (businessIdRaw: unknown, businessNameRaw?: unknown) => {
+      const businessId = String(businessIdRaw || '').trim();
+      if (!businessId) return null;
+      const current = businessMap.get(businessId);
+      if (current) {
+        const candidateName = String(businessNameRaw || '').trim();
+        if ((!current.businessName || current.businessName.startsWith('BM ')) && candidateName) {
+          current.businessName = candidateName;
+        }
+        return current;
+      }
+      const created = {
+        businessId,
+        businessName: String(businessNameRaw || `BM ${businessId}`),
+        accounts: new Map<string, MetaBusinessAdAccount>(),
+      };
+      businessMap.set(businessId, created);
+      return created;
+    };
+
+    // 1) Fonte principal: BMs explicitamente visíveis ao usuário conectado.
+    try {
+      const businesses = await getPaged(`${BASE()}/me/businesses`, {
+        access_token: this.accessToken,
+        fields: 'id,name',
+        limit: '100',
+      });
+      for (const business of businesses) {
+        ensureBusiness(business?.id, business?.name);
+      }
+    } catch (error) {
+      if (isMetaRateLimitError(error)) throw error;
+      // Continuamos pela lista de contas, pois alguns usuários visualizam contas
+      // de anúncios mesmo quando /me/businesses retorna vazio ou restrito.
+    }
+
+    // 2) Fallback complementar: contas acessíveis ao usuário e a BM/owner associada.
+    // Usamos várias combinações de fields porque a disponibilidade varia por versão/permissão.
+    const visibleAccounts = await getPagedWithFieldFallback(
+      `${BASE()}/me/adaccounts`,
+      this.accessToken,
+      [
+        'account_id,name,currency,account_status,business{id,name},owner_business{id,name}',
+        'account_id,name,currency,account_status,business{id,name}',
+        'account_id,name,currency,account_status,owner_business{id,name}',
+        'account_id,name,currency,account_status',
+      ],
+      '500',
+    );
+
+    for (const account of visibleAccounts) {
+      const accountId = String(account?.account_id || account?.id || '').replace(/^act_/, '').trim();
+      if (!accountId) continue;
+
+      const business = account?.business || account?.owner_business;
+      const businessId = String(business?.id || '').trim();
+      if (!businessId) continue;
+
+      const target = ensureBusiness(businessId, business?.name);
+      if (!target) continue;
+      target.accounts.set(accountId, {
+        accountId,
+        name: account?.name ? String(account.name) : undefined,
+        currency: account?.currency ? String(account.currency) : undefined,
+        accountStatus: account?.account_status == null ? null : Number(account.account_status),
+      });
+    }
 
     const directory: MetaBusinessDirectoryItem[] = [];
 
-    for (const business of businesses) {
-      const businessId = String(business?.id || '').trim();
-      if (!businessId) continue;
-      const businessName = String(business?.name || `BM ${businessId}`);
+    for (const entry of Array.from(businessMap.values())) {
+      const businessId = entry.businessId;
+      const businessName = entry.businessName;
 
       const usersRaw = await getPagedWithFieldFallback(
         `${BASE()}/${businessId}/business_users`,
@@ -194,7 +261,7 @@ export class MetaAdsService {
       );
       const pendingUsers = pendingRaw.map(normalizeBusinessUser).filter((item) => item.id);
 
-      const accountMap = new Map<string, MetaBusinessAdAccount>();
+      // Completa as contas da BM pelos dois edges oficiais do Business Manager.
       for (const edge of ['owned_ad_accounts', 'client_ad_accounts']) {
         try {
           const accounts = await getPaged(`${BASE()}/${businessId}/${edge}`, {
@@ -203,9 +270,9 @@ export class MetaAdsService {
             limit: '200',
           });
           for (const account of accounts) {
-            const accountId = String(account?.account_id || '').replace(/^act_/, '');
-            if (!accountId || accountMap.has(accountId)) continue;
-            accountMap.set(accountId, {
+            const accountId = String(account?.account_id || '').replace(/^act_/, '').trim();
+            if (!accountId) continue;
+            entry.accounts.set(accountId, {
               accountId,
               name: account?.name ? String(account.name) : undefined,
               currency: account?.currency ? String(account.currency) : undefined,
@@ -214,7 +281,7 @@ export class MetaAdsService {
           }
         } catch (error) {
           if (isMetaRateLimitError(error)) throw error;
-          // Uma BM pode estar visível ao usuário sem liberar um dos edges de contas.
+          // A BM continua aparecendo mesmo quando um edge específico não está liberado.
         }
       }
 
@@ -224,7 +291,8 @@ export class MetaAdsService {
         users,
         admins,
         pendingUsers,
-        adAccounts: Array.from(accountMap.values()).sort((a, b) => String(a.name || a.accountId).localeCompare(String(b.name || b.accountId))),
+        adAccounts: Array.from(entry.accounts.values())
+          .sort((a, b) => String(a.name || a.accountId).localeCompare(String(b.name || b.accountId))),
       });
     }
 
