@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from './shared/prisma.js';
 import { requireAuth, type AuthUser } from './shared/auth.js';
 import { fail, ok } from './shared/response.js';
+import { handleSupportMessageWithAi } from './modules/ai/campaignAgent.js';
 
 const adminRoles = new Set(['SUPER_ADMIN', 'AGENCY_ADMIN']);
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -317,6 +318,14 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       }
       return created;
     });
+    if (parsed.data.type === 'CHAT' && parsed.data.message && !isAdmin(user)) {
+      void handleSupportMessageWithAi({
+        conversationId: conversation.id,
+        senderUserId: user.id,
+        text: parsed.data.message,
+        logger: req.log,
+      }).catch((error) => req.log.error({ err: error, conversationId: conversation.id }, 'Falha na resposta automática do agente IA.'));
+    }
     return ok(conversation, parsed.data.type === 'TICKET' ? 'Chamado aberto.' : 'Conversa iniciada.');
   });
 
@@ -390,10 +399,19 @@ export async function registerSupportRoutes(app: FastifyInstance) {
           ...(user.id !== conversation.createdById && !conversation.firstResponseAt ? { firstResponseAt: now } : {}),
           ...readUpdate(user, conversation, now),
           ...((isAdmin(user) || user.id === conversation.assignedToId) && conversation.status === 'PENDING' ? { status: 'OPEN' } : {}),
+          ...(isAdmin(user) ? { aiEnabled: false } : {}),
         },
       });
       return created;
     });
+    if (!isAdmin(user) && conversation.type === 'CHAT' && parsed.data.body) {
+      void handleSupportMessageWithAi({
+        conversationId: conversation.id,
+        senderUserId: user.id,
+        text: parsed.data.body,
+        logger: req.log,
+      }).catch((error) => req.log.error({ err: error, conversationId: conversation.id }, 'Falha na resposta automática do agente IA.'));
+    }
     return ok(message, 'Mensagem enviada.');
   });
 
@@ -422,11 +440,12 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       status: z.enum(['OPEN', 'PENDING', 'RESOLVED', 'CLOSED']).optional(),
       priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
       assignToMe: z.boolean().optional(),
+      aiEnabled: z.boolean().optional(),
     }).safeParse(req.body);
     if (!params.success || !body.success) return reply.code(400).send(fail('VALIDATION', 'Atualização do chamado inválida.'));
     const conversation = await conversationForUser(user, params.data.id, reply);
     if (!conversation) return;
-    if (!isAdmin(user) && (body.data.priority || body.data.assignToMe || (body.data.status && !['OPEN', 'CLOSED'].includes(body.data.status)))) {
+    if (!isAdmin(user) && (body.data.priority || body.data.assignToMe || body.data.aiEnabled !== undefined || (body.data.status && !['OPEN', 'CLOSED'].includes(body.data.status)))) {
       return reply.code(403).send(fail('FORBIDDEN', 'Somente administradores podem alterar prioridade, responsável ou fluxo do chamado.'));
     }
     const updated = await prisma.supportConversation.update({
@@ -435,6 +454,9 @@ export async function registerSupportRoutes(app: FastifyInstance) {
         ...(body.data.status ? { status: body.data.status } : {}),
         ...(body.data.priority ? { priority: body.data.priority } : {}),
         ...(body.data.assignToMe && isAdmin(user) && !conversation.assignedToId ? { assignedToId: user.id } : {}),
+        ...(body.data.aiEnabled !== undefined && isAdmin(user)
+          ? { aiEnabled: body.data.aiEnabled, ...(body.data.aiEnabled ? { humanHandoffAt: null } : {}) }
+          : {}),
       },
     });
     return ok(updated, 'Atendimento atualizado.');
