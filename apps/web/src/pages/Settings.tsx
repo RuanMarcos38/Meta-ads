@@ -19,11 +19,11 @@ export default function Settings(){
   const [aiMessage,setAiMessage]=useState('');
 
   const cards=[
-    ['Integração Meta','Conexões, tokens, permissões e saúde das BMs.','/integracoes',Link2],
+    ['Conexão Meta','Gerencie a conexão e as contas vinculadas.','/integracoes',Link2],
     ['Usuários e acessos','Vínculos por empresa, BM e perfil.','/usuarios',Users],
     ['Alertas','Regras e ocorrências para tomada de decisão.','/alertas',Bell],
     ['Atendimento','Chat interno, chamados, arquivos e áudio.','/atendimento',MessageSquareText],
-    ['Business Managers','Estrutura e sincronização independente.','/business-managers',Database],
+    ['Gerenciadores de Negócios','Organize gerenciadores e contas por empresa.','/business-managers',Database],
   ];
 
   useEffect(()=>{
@@ -71,7 +71,7 @@ export default function Settings(){
   }
 
   return <div className="space-y-4">
-    <section className="page-heading"><div><p className="section-kicker">Sistema</p><h1>Configurações</h1><p>Configurações operacionais ficam agrupadas aqui. O usuário comum não vê informações técnicas espalhadas no dashboard.</p></div></section>
+    <section className="page-heading"><div><p className="section-kicker">Preferências</p><h1>Configurações</h1><p>Gerencie identidade, acessos e recursos disponíveis na plataforma.</p></div></section>
 
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {cards.filter(([title])=>admin||!['Usuários e acessos'].includes(String(title))).map(([title,description,path,Icon]:any)=>
@@ -101,7 +101,7 @@ export default function Settings(){
         <div className="mini-stat"><span>Relatório privado</span><strong>{aiStatus?.dailyReportHour!==undefined?(String(aiStatus.dailyReportHour).padStart(2,'0')+':00'):'—'}</strong><small>WhatsApp {aiStatus?.adminWhatsapp||'administrador'}</small></div>
         <div className="mini-stat"><span>Última análise</span><strong>{aiStatus?.lastAnalysisAt?new Date(aiStatus.lastAnalysisAt).toLocaleString('pt-BR'):'Ainda não executada'}</strong><small>Campanhas e métricas</small></div>
       </div>
-      {!aiStatus?.configured&&<div className="message-warning mt-3">Para respostas inteligentes e análise visual de criativos, configure <strong>OPENAI_API_KEY</strong> no EasyPanel. Sem a chave, a ferramenta mantém a análise técnica e encaminha o chat ao humano.</div>}
+      {!aiStatus?.configured&&<div className="message-warning mt-3">Os recursos inteligentes ainda não estão disponíveis. O atendimento continuará funcionando normalmente e poderá ser encaminhado para uma pessoa.</div>}
       {aiMessage&&<div className="message-success mt-3">{aiMessage}</div>}
     </section>}
 
@@ -136,8 +136,6 @@ export default function Settings(){
       <div className="mt-3 flex justify-end"><button className="primary-button" disabled={brandingLoading}><Save size={13}/>{brandingLoading?'Salvando...':'Salvar White Label'}</button></div>
     </form>}
 
-    <section className="corporate-card p-4"><div className="flex gap-3"><ShieldCheck size={17} className="mt-0.5 text-[#176846]"/><div><h2 className="panel-title">Escopo atual</h2><p className="panel-subtitle">As páginas operacionais herdam este escopo automaticamente.</p><div className="mt-3 grid gap-2 sm:grid-cols-3"><div className="mini-stat"><span>Empresa</span><strong>{scope.clients.find(c=>c.id===scope.clientId)?.name||'—'}</strong><small>ID interno</small></div><div className="mini-stat"><span>Business Manager</span><strong>{scope.businesses.find(b=>b.metaBusinessId===scope.businessId&&b.clientId===scope.clientId)?.name||'Todas/—'}</strong><small>{scope.businessId||'sem filtro'}</small></div><div className="mini-stat"><span>Conta Meta</span><strong>{scope.accounts.find(a=>a.id===scope.adAccountId)?.name||'Todas'}</strong><small>{scope.accounts.find(a=>a.id===scope.adAccountId)?.accountId||'sem filtro'}</small></div></div></div></div></section>
-
-    <section className="corporate-card p-4"><div className="flex items-center gap-2"><RefreshCw size={14} className="text-[#176846]"/><h2 className="panel-title">Atualização de dados</h2></div><p className="mt-2 text-[10px] leading-5 text-slate-500">Sincronização automática configurada a cada 5 minutos, isolada por empresa e BM. Uma falha em uma BM não interrompe as demais. O histórico importado permanece preservado em desconexões.</p></section>
+    <section className="corporate-card p-4"><div className="flex gap-3"><ShieldCheck size={17} className="mt-0.5 text-[#176846]"/><div><h2 className="panel-title">Seleção atual</h2><p className="panel-subtitle">Estas são as informações selecionadas para visualização.</p><div className="mt-3 grid gap-2 sm:grid-cols-3"><div className="mini-stat"><span>Empresa</span><strong>{scope.clients.find(c=>c.id===scope.clientId)?.name||'—'}</strong></div><div className="mini-stat"><span>Gerenciador</span><strong>{scope.businesses.find(b=>b.metaBusinessId===scope.businessId&&b.clientId===scope.clientId)?.name||'Todos'}</strong></div><div className="mini-stat"><span>Conta</span><strong>{scope.accounts.find(a=>a.id===scope.adAccountId)?.name||'Todas'}</strong></div></div></div></div></section>
   </div>;
 }
