@@ -9,7 +9,7 @@ export type SyncPeriod = { since?: string; until?: string; fullHistory?: boolean
 
 function resolvePeriod(jobType: SyncJobType, period?: SyncPeriod) {
   const until = period?.until && dayjs(period.until).isValid() ? dayjs(period.until) : dayjs();
-  const defaultDays = jobType === 'automatic' ? 3 : 30;
+  const defaultDays = jobType === 'automatic' ? 1 : 30;
   const since = period?.fullHistory
     ? dayjs('2010-01-01')
     : period?.since && dayjs(period.since).isValid()
@@ -109,20 +109,27 @@ export async function runSync(
       const token = decrypt(acc.connection.accessTokenEncrypted);
       const meta = new MetaAdsService(token);
 
-      if (!businessMaps.has(acc.connectionId)) {
-        try {
-          businessMaps.set(acc.connectionId, await meta.businessAdAccountMap());
-        } catch {
-          businessMaps.set(acc.connectionId, new Map());
+      const normalizedAccountId = String(acc.accountId).replace(/^act_/, '');
+      let discoveredBusiness: MetaBusinessRef | undefined;
+
+      // Se a conta já está vinculada à BM no banco, não reconstruímos o mapa
+      // de todas as BMs/contas a cada sincronização. Essa rotina era uma das
+      // principais fontes de chamadas globais desnecessárias.
+      if (!acc.businessId) {
+        if (!businessMaps.has(acc.connectionId)) {
+          try {
+            businessMaps.set(acc.connectionId, await meta.businessAdAccountMap());
+          } catch {
+            businessMaps.set(acc.connectionId, new Map());
+          }
         }
+        discoveredBusiness = businessMaps.get(acc.connectionId)?.get(normalizedAccountId);
       }
 
-      const normalizedAccountId = String(acc.accountId).replace(/^act_/, '');
-      const discoveredBusiness = businessMaps.get(acc.connectionId)?.get(normalizedAccountId);
-      const business = discoveredBusiness ?? (acc.businessId ? {
+      const business = acc.businessId ? {
         businessId: acc.businessId,
         businessName: acc.businessName || `BM ${acc.businessId}`,
-      } : undefined);
+      } : discoveredBusiness;
 
       if (business) {
         const manager = await ensureBusinessManager(organizationId, acc.clientId, business);
@@ -188,76 +195,80 @@ export async function runSync(
         campaignMap.set(saved.metaCampaignId, saved.id);
       }
 
-      const adSets = await meta.adSets(metaAccountId);
-      for (const adSet of adSets) {
-        const internalCampaignId = campaignMap.get(String(adSet.campaign_id || ''));
-        if (!internalCampaignId) continue;
-        const saved = await prisma.adSet.upsert({
-          where: {
-            campaignId_metaAdsetId: {
+      const fullHierarchy = Boolean(period?.fullHistory);
+
+      if (fullHierarchy) {
+        const adSets = await meta.adSets(metaAccountId);
+        for (const adSet of adSets) {
+          const internalCampaignId = campaignMap.get(String(adSet.campaign_id || ''));
+          if (!internalCampaignId) continue;
+          const saved = await prisma.adSet.upsert({
+            where: {
+              campaignId_metaAdsetId: {
+                campaignId: internalCampaignId,
+                metaAdsetId: adSet.id,
+              },
+            },
+            update: {
+              name: adSet.name,
+              status: adSet.status,
+              effectiveStatus: adSet.effective_status,
+              dailyBudget: adSet.daily_budget ? Number(adSet.daily_budget) / 100 : null,
+              lifetimeBudget: adSet.lifetime_budget ? Number(adSet.lifetime_budget) / 100 : null,
+              optimizationGoal: adSet.optimization_goal,
+              billingEvent: adSet.billing_event,
+            },
+            create: {
               campaignId: internalCampaignId,
               metaAdsetId: adSet.id,
+              name: adSet.name,
+              status: adSet.status,
+              effectiveStatus: adSet.effective_status,
+              dailyBudget: adSet.daily_budget ? Number(adSet.daily_budget) / 100 : null,
+              lifetimeBudget: adSet.lifetime_budget ? Number(adSet.lifetime_budget) / 100 : null,
+              optimizationGoal: adSet.optimization_goal,
+              billingEvent: adSet.billing_event,
             },
-          },
-          update: {
-            name: adSet.name,
-            status: adSet.status,
-            effectiveStatus: adSet.effective_status,
-            dailyBudget: adSet.daily_budget ? Number(adSet.daily_budget) / 100 : null,
-            lifetimeBudget: adSet.lifetime_budget ? Number(adSet.lifetime_budget) / 100 : null,
-            optimizationGoal: adSet.optimization_goal,
-            billingEvent: adSet.billing_event,
-          },
-          create: {
-            campaignId: internalCampaignId,
-            metaAdsetId: adSet.id,
-            name: adSet.name,
-            status: adSet.status,
-            effectiveStatus: adSet.effective_status,
-            dailyBudget: adSet.daily_budget ? Number(adSet.daily_budget) / 100 : null,
-            lifetimeBudget: adSet.lifetime_budget ? Number(adSet.lifetime_budget) / 100 : null,
-            optimizationGoal: adSet.optimization_goal,
-            billingEvent: adSet.billing_event,
-          },
-          select: { id: true, campaignId: true, metaAdsetId: true },
-        });
-        adSetMap.set(saved.metaAdsetId, { id: saved.id, campaignId: saved.campaignId });
-      }
+            select: { id: true, campaignId: true, metaAdsetId: true },
+          });
+          adSetMap.set(saved.metaAdsetId, { id: saved.id, campaignId: saved.campaignId });
+        }
 
-      const ads = await meta.ads(metaAccountId);
-      for (const ad of ads) {
-        const internalAdSet = adSetMap.get(String(ad.adset_id || ''));
-        if (!internalAdSet) continue;
-        await prisma.ad.upsert({
-          where: {
-            adSetId_metaAdId: {
-              adSetId: internalAdSet.id,
-              metaAdId: ad.id,
+        const ads = await meta.ads(metaAccountId);
+        for (const ad of ads) {
+          const internalAdSet = adSetMap.get(String(ad.adset_id || ''));
+          if (!internalAdSet) continue;
+          await prisma.ad.upsert({
+            where: {
+              adSetId_metaAdId: {
+                adSetId: internalAdSet.id,
+                metaAdId: ad.id,
+              },
             },
-          },
-          update: {
-            campaignId: internalAdSet.campaignId,
-            name: ad.name,
-            status: ad.status,
-            effectiveStatus: ad.effective_status,
-            creativeId: ad.creative?.id ? String(ad.creative.id) : null,
-          },
-          create: {
-            adSetId: internalAdSet.id,
-            campaignId: internalAdSet.campaignId,
-            metaAdId: ad.id,
-            name: ad.name,
-            status: ad.status,
-            effectiveStatus: ad.effective_status,
-            creativeId: ad.creative?.id ? String(ad.creative.id) : null,
-          },
-        });
+            update: {
+              campaignId: internalAdSet.campaignId,
+              name: ad.name,
+              status: ad.status,
+              effectiveStatus: ad.effective_status,
+              creativeId: ad.creative?.id ? String(ad.creative.id) : null,
+            },
+            create: {
+              adSetId: internalAdSet.id,
+              campaignId: internalAdSet.campaignId,
+              metaAdId: ad.id,
+              name: ad.name,
+              status: ad.status,
+              effectiveStatus: ad.effective_status,
+              creativeId: ad.creative?.id ? String(ad.creative.id) : null,
+            },
+          });
+        }
       }
 
       const accountSince = period?.fullHistory ? earliestCampaignDate(campaigns, since) : since;
       if (accountSince < earliestImported) earliestImported = accountSince;
 
-      const levels: MetaInsightLevel[] = ['campaign', 'adset', 'ad'];
+      const levels: MetaInsightLevel[] = fullHierarchy ? ['campaign', 'adset', 'ad'] : ['campaign'];
       for (const level of levels) {
         const insights = await meta.insights(metaAccountId, accountSince, until, level);
         for (const insight of insights) {

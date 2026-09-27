@@ -2,10 +2,14 @@ import type { FastifyBaseLogger } from 'fastify';
 import { env } from '../../config/env.js';
 import { prisma } from '../../shared/prisma.js';
 import { runSync } from './syncService.js';
+import { isMetaRateLimitError } from './MetaAdsService.js';
 
 function configuredIntervalMinutes() {
-  const parsed = Number.parseInt(process.env.SYNC_INTERVAL_MINUTES?.trim() || '5', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
+  const parsed = Number.parseInt(process.env.SYNC_INTERVAL_MINUTES?.trim() || '15', 10);
+  const requested = Number.isFinite(parsed) && parsed > 0 ? parsed : 15;
+  // Abaixo de 15 minutos, múltiplas contas/BMs podem consumir a quota global
+  // da Meta antes de uma janela anterior terminar.
+  return Math.max(15, requested);
 }
 
 export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
@@ -19,9 +23,14 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
 
   let running = false;
   let stopped = false;
+  let metaBackoffUntil = 0;
 
   async function tick() {
     if (running || stopped) return;
+    if (Date.now() < metaBackoffUntil) {
+      logger.warn({ retryAt: new Date(metaBackoffUntil).toISOString() }, 'Sincronização Meta aguardando janela segura após rate limit global.');
+      return;
+    }
     running = true;
 
     try {
@@ -94,10 +103,12 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
                 businessId: scope.businessId,
                 reason: hasAccountWithoutMetrics ? 'new_account' : 'history_not_completed',
               },
-              'Importação histórica completa obrigatória iniciada para BM.',
+              'Carga inicial controlada de métricas iniciada para BM.',
             );
+            // O scheduler faz somente bootstrap de 30 dias. Histórico completo
+            // fica reservado à ação explícita para não consumir a quota global.
             await runSync(scope.organizationId, scope.clientId, undefined, 'history', {
-              fullHistory: true,
+              fullHistory: false,
               businessId: scope.businessId,
             });
           } else {
@@ -106,6 +117,17 @@ export function startMetaSyncScheduler(logger: FastifyBaseLogger) {
             });
           }
         } catch (error) {
+          if (isMetaRateLimitError(error)) {
+            metaBackoffUntil = Date.now() + 15 * 60 * 1000;
+            logger.warn({
+              err: error,
+              organizationId: scope.organizationId,
+              clientId: scope.clientId,
+              businessId: scope.businessId,
+              retryAt: new Date(metaBackoffUntil).toISOString(),
+            }, 'Meta atingiu limite global; demais sincronizações foram pausadas para preservar a quota.');
+            break;
+          }
           logger.error({
             err: error,
             organizationId: scope.organizationId,
