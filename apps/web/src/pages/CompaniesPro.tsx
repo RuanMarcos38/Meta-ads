@@ -79,6 +79,11 @@ export default function CompaniesPro() {
   const [savingId, setSavingId] = useState('');
   const [editing, setEditing] = useState<Client | null>(null);
   const [editForm, setEditForm] = useState<EditForm>(emptyEditForm);
+  const [editBusinesses, setEditBusinesses] = useState<BusinessChoice[]>([]);
+  const [editBusinessLoading, setEditBusinessLoading] = useState(false);
+  const [editBusinessLoaded, setEditBusinessLoaded] = useState(false);
+  const [editMetaConnectionRequired, setEditMetaConnectionRequired] = useState(false);
+  const [editMetaConnecting, setEditMetaConnecting] = useState(false);
   const [error, setError] = useState('');
 
   async function load() {
@@ -192,10 +197,97 @@ export default function CompaniesPro() {
     }
   }
 
+  async function loadEditBusinesses(clientId: string) {
+    setEditBusinessLoading(true);
+    setEditMetaConnectionRequired(false);
+    setError('');
+    try {
+      const response = await api.post('/workspace/business-managers/discover-from-meta', { clientId });
+      const rows = Array.isArray(response.data?.data?.businesses) ? response.data.data.businesses : [];
+      setEditBusinesses(rows.map((item: any) => ({
+        businessId: String(item.businessId),
+        businessName: String(item.businessName || item.businessId),
+        selected: Boolean(item.selected),
+        accounts: Array.isArray(item.accounts) ? item.accounts.map((account: any) => ({
+          accountId: String(account.accountId),
+          name: String(account.name || account.accountId),
+          currency: account.currency || null,
+          selected: Boolean(account.selected),
+        })) : [],
+      })));
+      setEditBusinessLoaded(true);
+    } catch (err: any) {
+      setEditBusinesses([]);
+      setEditBusinessLoaded(false);
+      const code = err?.response?.data?.error?.code;
+      if (code === 'META_CONNECTION_REQUIRED') {
+        setEditMetaConnectionRequired(true);
+      } else {
+        setError(err?.response?.data?.error?.message || 'Não foi possível carregar as Business Managers desta empresa.');
+      }
+    } finally {
+      setEditBusinessLoading(false);
+    }
+  }
+
+  function toggleEditBusiness(businessId: string) {
+    setEditBusinesses((current) => current.map((business) => {
+      if (business.businessId !== businessId) return business;
+      const selected = !business.selected;
+      return {
+        ...business,
+        selected,
+        accounts: business.accounts.map((account) => ({ ...account, selected })),
+      };
+    }));
+  }
+
+  function toggleEditAccount(businessId: string, accountId: string) {
+    setEditBusinesses((current) => current.map((business) => business.businessId !== businessId ? business : {
+      ...business,
+      accounts: business.accounts.map((account) => account.accountId === accountId ? { ...account, selected: !account.selected } : account),
+    }));
+  }
+
+  async function connectEditMeta(clientId: string) {
+    setEditMetaConnecting(true);
+    setError('');
+    const popup = window.open('about:blank', 'gestao-ads-meta-oauth', 'width=760,height=860');
+    try {
+      const response = await api.get('/meta/oauth/start', { params: { clientId } });
+      const authUrl = response.data?.data?.authUrl;
+      if (!authUrl) throw new Error('A Meta não retornou a URL de autorização.');
+      if (popup) popup.location.href = authUrl;
+      else window.location.assign(authUrl);
+
+      if (popup) {
+        await new Promise<void>((resolve) => {
+          const timer = window.setInterval(() => {
+            if (popup.closed) {
+              window.clearInterval(timer);
+              resolve();
+            }
+          }, 800);
+        });
+        await loadEditBusinesses(clientId);
+        await load();
+        window.dispatchEvent(new Event('gestao-ads:scope-refresh'));
+      }
+    } catch (err: any) {
+      popup?.close();
+      setError(err?.response?.data?.error?.message || err?.message || 'Não foi possível conectar esta empresa à Meta.');
+    } finally {
+      setEditMetaConnecting(false);
+    }
+  }
+
   function startEdit(client: Client) {
     if (!canAdmin) return;
     setError('');
     setEditing(client);
+    setEditBusinesses([]);
+    setEditBusinessLoaded(false);
+    setEditMetaConnectionRequired(false);
     setEditForm({
       name: client.name || '',
       companyName: client.companyName || '',
@@ -205,6 +297,7 @@ export default function CompaniesPro() {
       segment: client.segment || '',
       status: client.status === 'inactive' ? 'inactive' : 'active',
     });
+    void loadEditBusinesses(client.id);
   }
 
   async function saveEdit(e: React.FormEvent) {
@@ -213,6 +306,13 @@ export default function CompaniesPro() {
     setSavingId(editing.id);
     setError('');
     try {
+      const selectedBusinesses = editBusinesses.filter((business) => business.selected);
+      if (editBusinessLoaded && !selectedBusinesses.length) {
+        setError('Selecione pelo menos uma Business Manager para esta empresa.');
+        setSavingId('');
+        return;
+      }
+
       await api.patch(`/clients/${editing.id}`, {
         name: editForm.name.trim(),
         companyName: editForm.companyName.trim() || null,
@@ -222,6 +322,17 @@ export default function CompaniesPro() {
         segment: editForm.segment.trim() || null,
         status: editForm.status,
       });
+
+      if (editBusinessLoaded) {
+        await api.post('/workspace/business-managers/assign-from-meta', {
+          clientId: editing.id,
+          selections: selectedBusinesses.map((business) => ({
+            businessId: business.businessId,
+            accountIds: business.accounts.filter((account) => account.selected).map((account) => account.accountId),
+          })),
+        });
+      }
+
       setEditing(null);
       setEditForm(emptyEditForm);
       await load();
@@ -335,7 +446,7 @@ export default function CompaniesPro() {
           <h2 className="text-lg font-semibold">{editing.name}</h2>
           <p className="text-sm text-slate-500">Para agrupar empresas do mesmo cliente, utilize o mesmo e-mail cadastral ou telefone. Os vínculos operacionais não são alterados.</p>
         </div>
-        <button type="button" className="icon-button" title="Cancelar edição" onClick={() => { setEditing(null); setEditForm(emptyEditForm); }}><X size={14} /></button>
+        <button type="button" className="icon-button" title="Cancelar edição" onClick={() => { setEditing(null); setEditForm(emptyEditForm); setEditBusinesses([]); setEditBusinessLoaded(false); setEditMetaConnectionRequired(false); }}><X size={14} /></button>
       </div>
       <form onSubmit={saveEdit} className="space-y-3">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -347,9 +458,51 @@ export default function CompaniesPro() {
           <label className="space-y-1"><span className="text-xs font-medium text-slate-600">Segmento</span><input className="field-control w-full" value={editForm.segment} onChange={(e) => setEditForm((v) => ({ ...v, segment: e.target.value }))} /></label>
           <label className="space-y-1"><span className="text-xs font-medium text-slate-600">Status</span><select className="field-control w-full" value={editForm.status} onChange={(e) => setEditForm((v) => ({ ...v, status: e.target.value as EditForm['status'] }))}><option value="active">Ativa</option><option value="inactive">Inativa</option></select></label>
         </div>
+        <div className="rounded-[8px] border border-[#dfe5e2] bg-[#fbfcfb] p-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="panel-title">Business Managers desta empresa</h3>
+              <p className="panel-subtitle">Selecione uma ou mais BMs e as contas de anúncios autorizadas. O cliente terá acesso somente ao que estiver marcado aqui.</p>
+            </div>
+            {!editMetaConnectionRequired && <button type="button" className="secondary-button" onClick={() => { void loadEditBusinesses(editing.id); }} disabled={editBusinessLoading}>
+              <RefreshCw size={13} className={editBusinessLoading ? 'animate-spin' : ''} />Atualizar BMs
+            </button>}
+          </div>
+
+          {editBusinessLoading && <div className="empty-state"><RefreshCw size={18} className="animate-spin" /><span>Carregando BMs disponíveis na Meta...</span></div>}
+
+          {!editBusinessLoading && editMetaConnectionRequired && <div className="message-warning flex flex-wrap items-center justify-between gap-2">
+            <span>Esta empresa ainda não possui conexão Meta ativa. Conecte a Meta para carregar as BMs diretamente dentro do cadastro.</span>
+            <button type="button" className="primary-button" onClick={() => { void connectEditMeta(editing.id); }} disabled={editMetaConnecting}>
+              <Link2 size={13} />{editMetaConnecting ? 'Conectando...' : 'Conectar Meta'}
+            </button>
+          </div>}
+
+          {!editBusinessLoading && editBusinessLoaded && <div className="grid gap-3 xl:grid-cols-2">
+            {editBusinesses.map((business) => <article key={business.businessId} className={`rounded-[8px] border p-3 ${business.selected ? 'border-blue-200 bg-blue-50/40' : 'border-[#dfe5e2] bg-white'}`}>
+              <label className="flex cursor-pointer items-start gap-2">
+                <input className="mt-1" type="checkbox" checked={business.selected} onChange={() => toggleEditBusiness(business.businessId)} />
+                <span className="min-w-0">
+                  <strong className="block text-[12px] font-semibold text-slate-700">{business.businessName}</strong>
+                  <small className="block text-[10px] text-slate-500">ID {business.businessId} · {business.accounts.length} conta{business.accounts.length === 1 ? '' : 's'}</small>
+                </span>
+              </label>
+              {business.selected && <div className="mt-3 space-y-1.5 border-t border-[#e2e7e4] pt-2">
+                <p className="mb-2 text-[10px] font-semibold text-slate-600">Contas autorizadas nesta BM</p>
+                {business.accounts.map((account) => <label key={account.accountId} className="flex cursor-pointer items-center gap-2 rounded-[6px] border border-[#e3e8e5] bg-white px-2.5 py-2 text-[10px] text-slate-600">
+                  <input type="checkbox" checked={account.selected} onChange={() => toggleEditAccount(business.businessId, account.accountId)} />
+                  <span className="min-w-0 flex-1"><strong className="block truncate font-medium text-slate-700">{account.name}</strong><small className="text-slate-400">Conta {account.accountId}{account.currency ? ` · ${account.currency}` : ''}</small></span>
+                </label>)}
+                {!business.accounts.length && <p className="text-[10px] text-slate-400">Esta BM não retornou contas de anúncios.</p>}
+              </div>}
+            </article>)}
+            {!editBusinesses.length && <div className="empty-state corporate-card col-span-full"><BriefcaseBusiness size={18} /><span>Nenhuma BM encontrada para o usuário Meta conectado.</span></div>}
+          </div>}
+        </div>
+
         <div className="flex flex-wrap justify-end gap-2">
-          <button type="button" className="secondary-button" onClick={() => { setEditing(null); setEditForm(emptyEditForm); }}><X size={14} />Cancelar</button>
-          <button className="primary-button" disabled={savingId === editing.id}><Save size={14} />{savingId === editing.id ? 'Salvando...' : 'Salvar alterações'}</button>
+          <button type="button" className="secondary-button" onClick={() => { setEditing(null); setEditForm(emptyEditForm); setEditBusinesses([]); setEditBusinessLoaded(false); setEditMetaConnectionRequired(false); }}><X size={14} />Cancelar</button>
+          <button className="primary-button" disabled={savingId === editing.id || editBusinessLoading || editMetaConnecting}><Save size={14} />{savingId === editing.id ? 'Salvando...' : 'Salvar empresa e BMs'}</button>
         </div>
       </form>
     </section>}
