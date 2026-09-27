@@ -225,8 +225,8 @@ async function getFinancialAccountGraph(path: string, token: string) {
   }
 
   const optionalFieldSets = [
-    'total_prepay_balance,prepay_account_balance',
-    'total_prepay_balance.fields(amount_in_hundredths,amount,currency),prepay_account_balance.fields(amount_in_hundredths,amount,currency)',
+    'total_prepay_balance',
+    'prepay_account_balance',
   ];
 
   for (const fields of optionalFieldSets) {
@@ -506,7 +506,10 @@ export async function registerMetaFinancialRoutes(app: FastifyInstance) {
           businessName: account.businessName,
           currency,
           available: false,
-          error: graphError(error),
+          rateLimited: isGraphRateLimit(error),
+          error: isGraphRateLimit(error)
+            ? 'A Meta limitou temporariamente as consultas desta conta. O sistema aguardará a janela segura e tentará novamente sem duplicar chamadas.'
+            : 'A Meta não liberou os dados financeiros desta conta nesta consulta.',
         };
       }
     }));
