@@ -1,0 +1,36 @@
+{
+  "name": "Gestão Ads — R2R Marketing Digital",
+  "short_name": "Gestão Ads",
+  "description": "Gestão de campanhas, Business Managers, contas, métricas e relatórios.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "background_color": "#f1f3f1",
+  "theme_color": "#2563eb",
+  "orientation": "any",
+  "lang": "pt-BR",
+  "categories": [
+    "business",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-09-29T13:32:23.129Z",
+  "routes": [
+    "/",
+    "/login",
+    "/agencia",
+    "/empresas",
+    "/clientes",
+    "/business-managers",
+    "/contas-meta",
+    "/campanhas",
+    "/google-analytics",
+    "/relatorios",
+    "/alertas",
+    "/atendimento",
+    "/usuarios",
+    "/integracoes",
+    "/auditoria",
+    "/configuracoes"
+  ]
+}
