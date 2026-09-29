@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDailySummaryMessage, normalizePhone, whatsappDailyLimitKey } from './notificationScheduler.js';
+import { buildDailySummaryMessage, normalizePhone, resolveAlertBalance, whatsappDailyLimitKey } from './notificationScheduler.js';
 
 describe('notificationScheduler', () => {
   it('normaliza telefone brasileiro da empresa sem alterar número já internacional', () => {
@@ -22,6 +22,37 @@ describe('notificationScheduler', () => {
     const afterMidnight = whatsappDailyLimitKey('5547999371478', new Date('2026-09-28T03:01:00.000Z'));
     expect(beforeMidnight.localDate).toBe('2026-09-27');
     expect(afterMidnight.localDate).toBe('2026-09-28');
+  });
+
+  it('não transforma balance em saldo disponível de conta pré-paga', () => {
+    expect(resolveAlertBalance({
+      is_prepay_account: true,
+      currency: 'BRL',
+      balance: '381',
+    }, 'BRL')).toBeNull();
+  });
+
+  it('usa o fundo pré-pago real retornado pela Meta no alerta', () => {
+    expect(resolveAlertBalance({
+      is_prepay_account: true,
+      currency: 'BRL',
+      balance: '381',
+      total_prepay_balance: {
+        amount_in_hundredths: '14515',
+        currency: 'BRL',
+      },
+    }, 'BRL')).toMatchObject({
+      value: 145.15,
+      currency: 'BRL',
+      source: 'total_prepay_balance',
+    });
+  });
+
+  it('não inventa saldo zero quando o campo balance não veio da Meta', () => {
+    expect(resolveAlertBalance({
+      is_prepay_account: false,
+      currency: 'BRL',
+    }, 'BRL')).toBeNull();
   });
 
   it('mantém o padrão obrigatório do resumo diário', () => {
