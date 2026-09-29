@@ -4,10 +4,10 @@ import type { FastifyBaseLogger } from 'fastify';
 import { env } from '../../config/env.js';
 import { decrypt } from '../../shared/crypto.js';
 import { prisma } from '../../shared/prisma.js';
+import { resolveDisplayedBalance } from '../../metaFinancialRoutes.js';
 
 const LOW_BALANCE_THRESHOLD_BRL = 10;
 const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
-const ZERO_DECIMAL_CURRENCIES = new Set(['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF']);
 
 export function normalizePhone(value?: string | null) {
   const digits = String(value || '').replace(/\D/g, '');
@@ -77,14 +77,78 @@ export function shouldSendDailySummary(now = new Date()) {
   return clock.hour === 23 && clock.minute >= 55;
 }
 
-function minorToMajor(value: unknown, currency: string) {
-  const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric)) return 0;
-  return numeric / (ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) ? 1 : 100);
-}
-
 function graphBaseUrl() {
   return `https://graph.facebook.com/${env.meta.apiVersion}`;
+}
+
+type MetaAlertBalance = {
+  value: number;
+  currency: string;
+  source: string;
+  data: any;
+};
+
+export function resolveAlertBalance(data: any, currency: string): MetaAlertBalance | null {
+  const normalizedCurrency = String(currency || data?.currency || '').toUpperCase();
+  const isPrepay = Boolean(data?.is_prepay_account)
+    || String(data?.stored_balance_status || '').toLowerCase() === 'prepay';
+
+  // Em conta pós-paga, "balance" só é confiável para o alerta se o campo
+  // realmente veio da Meta. Campo ausente nunca pode virar saldo zero.
+  if (!isPrepay && data?.balance == null) return null;
+
+  const displayed = resolveDisplayedBalance(data, normalizedCurrency);
+  if (displayed.value == null || !Number.isFinite(displayed.value)) return null;
+
+  return {
+    value: displayed.value,
+    currency: normalizedCurrency,
+    source: displayed.source,
+    data,
+  };
+}
+
+async function fetchMetaAlertBalance(actId: string, token: string, currencyHint: string): Promise<MetaAlertBalance | null> {
+  const baseResponse = await axios.get(`${graphBaseUrl()}/${actId}`, {
+    params: {
+      fields: 'account_id,name,currency,balance,is_prepay_account',
+      access_token: token,
+    },
+    timeout: 20_000,
+  });
+
+  let data = baseResponse.data || {};
+  const currency = String(data?.currency || currencyHint || '').toUpperCase();
+  let resolved = resolveAlertBalance(data, currency);
+
+  if (!Boolean(data?.is_prepay_account) || resolved) {
+    return resolved;
+  }
+
+  // Para contas pré-pagas, "balance" NÃO representa os fundos disponíveis
+  // exibidos no Gerenciador de Anúncios. Buscamos os CurrencyAmount oficiais
+  // usados também pela tela financeira da própria ferramenta.
+  const optionalFieldSets = [
+    'total_prepay_balance.fields(amount,amount_in_hundredths,currency)',
+    'prepay_account_balance.fields(amount,amount_in_hundredths,currency)',
+  ];
+
+  for (const fields of optionalFieldSets) {
+    try {
+      const extraResponse = await axios.get(`${graphBaseUrl()}/${actId}`, {
+        params: { fields, access_token: token },
+        timeout: 20_000,
+      });
+      data = { ...data, ...(extraResponse.data || {}) };
+      resolved = resolveAlertBalance(data, currency);
+      if (resolved) return resolved;
+    } catch {
+      // Campo financeiro opcional pode não estar disponível para determinado
+      // token/conta. Nesse caso não inferimos nem inventamos um saldo.
+    }
+  }
+
+  return null;
 }
 
 export function whatsappReady() {
@@ -272,16 +336,21 @@ async function lowBalanceCheck(logger: FastifyBaseLogger) {
     try {
       const token = decrypt(account.connection.accessTokenEncrypted);
       const actId = String(account.accountId).startsWith('act_') ? String(account.accountId) : `act_${account.accountId}`;
-      const response = await axios.get(`${graphBaseUrl()}/${actId}`, {
-        params: { fields: 'account_id,name,currency,balance', access_token: token },
-        timeout: 20_000,
-      });
-      const currency = String(response.data?.currency || account.currency || '').toUpperCase();
+      const realBalance = await fetchMetaAlertBalance(actId, token, String(account.currency || 'BRL'));
+      if (!realBalance) {
+        logger.warn(
+          { clientId: account.clientId, businessId: account.businessId, adAccountId: account.id },
+          'Saldo real da Meta indisponível para o alerta; nenhuma mensagem será enviada com valor estimado.',
+        );
+        continue;
+      }
+
+      const currency = realBalance.currency;
       if (currency !== 'BRL') continue;
-      const balance = minorToMajor(response.data?.balance, currency);
+      const balance = realBalance.value;
       if (balance >= LOW_BALANCE_THRESHOLD_BRL) continue;
 
-      const accountName = String(response.data?.name || account.name || `Conta ${account.accountId}`);
+      const accountName = String(realBalance.data?.name || account.name || `Conta ${account.accountId}`);
       const businessName = account.businessName || account.businessId || 'BM não identificada';
       const title = `Saldo Meta abaixo de R$ 10,00 — ${accountName}`;
       const message = `A conta ${accountName} da BM ${businessName} está com saldo de ${currencyPt(balance)}. Faça uma recarga para evitar interrupção das campanhas.`;
@@ -341,6 +410,7 @@ async function lowBalanceCheck(logger: FastifyBaseLogger) {
               clientId: account.clientId,
               balance,
               currency: 'BRL',
+              balanceSource: realBalance.source,
               localDate: delivery.localDate,
               dailyLimit: 1,
             },
