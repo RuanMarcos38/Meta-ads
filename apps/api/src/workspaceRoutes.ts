@@ -767,12 +767,12 @@ export async function registerWorkspaceRoutes(app: FastifyInstance) {
 
   app.get('/workspace/reports', { preHandler: requireAuth() }, async (req, reply) => {
     const user = req.user as AuthUser;
-    const query = z.object({ clientId: z.string().uuid().optional(), businessId: z.string().optional() }).safeParse(req.query);
+    const query = z.object({ clientId: z.string().uuid().optional(), businessId: z.string().optional(), adAccountId: z.string().uuid().optional() }).safeParse(req.query);
     if (!query.success) return reply.code(400).send(fail('VALIDATION', 'Filtro de relatórios inválido.'));
     const clientId = effectiveClientId(user, query.data.clientId);
     const businessId = effectiveBusinessId(user, query.data.businessId);
     const rows = await prisma.report.findMany({
-      where: { organizationId: user.organizationId!, ...(clientId ? { clientId } : {}), ...(businessId && businessId !== '__NO_BUSINESS__' ? { businessId } : {}) },
+      where: { organizationId: user.organizationId!, ...(clientId ? { clientId } : {}), ...(businessId && businessId !== '__NO_BUSINESS__' ? { businessId } : {}), ...(query.data.adAccountId ? { adAccountId: query.data.adAccountId } : {}) },
       orderBy: { createdAt: 'desc' }, take: 200,
     });
     return ok(rows);

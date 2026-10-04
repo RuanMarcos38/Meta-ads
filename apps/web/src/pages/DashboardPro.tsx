@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, BarChart3, CalendarRange, CheckCircle2, Circle, Megaphone, MessageCircle, MousePointerClick, RefreshCw, ShoppingCart, Target, TrendingDown, TrendingUp, WalletCards } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../api';
@@ -43,15 +43,19 @@ function delta(current: number, previous: number) {
 
 export default function DashboardPro() {
   const scope = useScope();
+  const scopeKey = JSON.stringify([scope.clientId, scope.businessId, scope.adAccountId]);
   const [period, setPeriod] = useState<PeriodPreset>('month');
   const [since, setSince] = useState(monthStart());
   const [until, setUntil] = useState(today());
-  const [campaignId, setCampaignId] = useState('');
-  const [summary, setSummary] = useState<Summary>(empty);
-  const [previous, setPrevious] = useState<Summary>(empty);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [daily, setDaily] = useState<Daily[]>([]);
-  const [health, setHealth] = useState<Health | null>(null);
+  const [campaignSelection, setCampaignSelection] = useState({ scopeKey: '', id: '' });
+  const campaignId = campaignSelection.scopeKey === scopeKey ? campaignSelection.id : '';
+  const setCampaignId = (id: string) => setCampaignSelection({ scopeKey, id });
+  const [storedSummary, setSummary] = useState<Summary>(empty);
+  const [storedPrevious, setPrevious] = useState<Summary>(empty);
+  const [storedCampaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [storedDaily, setDaily] = useState<Daily[]>([]);
+  const [storedHealth, setHealth] = useState<Health | null>(null);
+  const [dataContext, setDataContext] = useState('');
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
@@ -66,6 +70,14 @@ export default function DashboardPro() {
     since,
     until,
   }), [scope.clientId, scope.businessId, scope.adAccountId, campaignId, since, until]);
+  const contextKey = JSON.stringify([params, compare]);
+  const currentContext = useRef(contextKey);
+  currentContext.current = contextKey;
+  const summary = dataContext === contextKey ? storedSummary : empty;
+  const previous = dataContext === contextKey ? storedPrevious : empty;
+  const campaigns = dataContext === contextKey ? storedCampaigns : [];
+  const daily = dataContext === contextKey ? storedDaily : [];
+  const health = dataContext === contextKey ? storedHealth : null;
 
   function previousPeriod() {
     const a = new Date(`${since}T00:00:00`);
@@ -90,16 +102,19 @@ export default function DashboardPro() {
         compare ? api.get('/performance/summary', { params: { ...params, ...prev } }) : Promise.resolve(null),
         api.get('/workspace/integration-health', { params: { clientId: scope.clientId, ...(scope.businessId ? { businessId: scope.businessId } : {}) } }).catch(() => null),
       ]);
+      if (currentContext.current !== contextKey) return;
       setSummary({ ...empty, ...(summaryResponse.data?.data || {}) });
       setPrevious({ ...empty, ...(previousResponse?.data?.data || {}) });
       setCampaigns(Array.isArray(campaignsResponse.data?.data) ? campaignsResponse.data.data : []);
       setDaily(Array.isArray(dailyResponse.data?.data) ? dailyResponse.data.data : []);
       const healthRows = healthResponse?.data?.data;
       setHealth(Array.isArray(healthRows) ? healthRows[0] || null : null);
+      setDataContext(contextKey);
     } catch (requestError: any) {
+      if (currentContext.current !== contextKey) return;
       setError('Não foi possível carregar os dados neste momento. Tente novamente em instantes.');
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && currentContext.current === contextKey) setLoading(false);
     }
   }
 

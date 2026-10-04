@@ -14,6 +14,7 @@ const routes = [
   'relatorios',
   'alertas',
   'atendimento',
+  'pagamentos',
   'usuarios',
   'integracoes',
   'auditoria',
