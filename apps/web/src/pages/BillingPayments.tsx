@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
   CreditCard,
@@ -37,14 +37,21 @@ function detailText(details?:Record<string,unknown>|null){
 
 export default function BillingPayments(){
   const scope=useScope();
-  const [data,setData]=useState<PaymentCenter|null>(null);
-  const [activities,setActivities]=useState<Activity[]>([]);
+  const [storedData,setData]=useState<PaymentCenter|null>(null);
+  const [storedActivities,setActivities]=useState<Activity[]>([]);
+  const [dataContext,setDataContext]=useState('');
+  const [activityContext,setActivityContext]=useState('');
   const [loading,setLoading]=useState(false);
   const [activityLoading,setActivityLoading]=useState(false);
   const [error,setError]=useState('');
 
   const allowedAccounts=useMemo(()=>scope.accounts.filter(a=>a.clientId===scope.clientId&&a.isActive&&a.isAssigned&&(!scope.businessId||a.businessId===scope.businessId)),[scope.accounts,scope.clientId,scope.businessId]);
   const selectedAccountId=scope.adAccountId||allowedAccounts[0]?.id||'';
+  const contextKey=JSON.stringify([scope.clientId,scope.businessId,selectedAccountId]);
+  const currentContext=useRef(contextKey);
+  currentContext.current=contextKey;
+  const data=dataContext===contextKey?storedData:null;
+  const activities=activityContext===contextKey?storedActivities:[];
 
   async function load(){
     if(!scope.clientId||!selectedAccountId){setData(null);return;}
@@ -52,26 +59,32 @@ export default function BillingPayments(){
     try{
       const params={clientId:scope.clientId,...(scope.businessId?{businessId:scope.businessId}:{}),adAccountId:selectedAccountId};
       const response=await api.get('/financial/meta-payment-center',{params});
+      if(currentContext.current!==contextKey)return;
       setData(response.data?.data||null);
+      setDataContext(contextKey);
     }catch(e:any){
+      if(currentContext.current!==contextKey)return;
       setData(null);
       setError(e?.response?.data?.error?.message||'Não foi possível carregar cobrança e pagamentos desta conta.');
-    }finally{setLoading(false);}
+    }finally{if(currentContext.current===contextKey)setLoading(false);}
   }
 
   async function loadActivity(){
-    if(!scope.clientId||!selectedAccountId)return;
+    if(!scope.clientId||!selectedAccountId){setActivities([]);return;}
     setActivityLoading(true);
     try{
       const response=await api.get('/financial/meta-activity',{params:{clientId:scope.clientId,...(scope.businessId?{businessId:scope.businessId}:{}),adAccountId:selectedAccountId}});
+      if(currentContext.current!==contextKey)return;
       setActivities(Array.isArray(response.data?.data?.activities)?response.data.data.activities:[]);
+      setActivityContext(contextKey);
     }catch(e:any){
+      if(currentContext.current!==contextKey)return;
       setActivities([]);
       setError(e?.response?.data?.error?.message||'Não foi possível consultar a atividade de pagamento.');
-    }finally{setActivityLoading(false);}
+    }finally{if(currentContext.current===contextKey)setActivityLoading(false);}
   }
 
-  useEffect(()=>{void load();},[scope.clientId,scope.businessId,selectedAccountId]);
+  useEffect(()=>{setData(null);setActivities([]);setError('');void load();void loadActivity();},[scope.clientId,scope.businessId,selectedAccountId]);
 
   const account=data?.account;
   const funding=data?.paymentProfile?.currentFundingSource||account?.fundingSource;

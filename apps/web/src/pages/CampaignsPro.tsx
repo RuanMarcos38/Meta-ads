@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CalendarRange, ChevronRight, Circle, Filter, Layers3, Megaphone, MonitorSmartphone, Pause, Play, Plus, RefreshCw, Search, Target, UsersRound, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
@@ -55,25 +55,33 @@ function statusClasses(row: MetricRow) {
 export default function CampaignsPro() {
   const user = useAuth((state) => state.user);
   const scope = useScope();
+  const scopeKey = JSON.stringify([scope.clientId, scope.businessId, scope.adAccountId]);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const canManage = ['SUPER_ADMIN', 'AGENCY_ADMIN', 'MANAGER'].includes(user?.role || '');
   const [tab, setTab] = useState<'campaigns' | 'adsets' | 'ads'>('campaigns');
   const [since, setSince] = useState(ago(29));
   const [until, setUntil] = useState(today());
-  const [campaignId, setCampaignId] = useState('');
-  const [adSetId, setAdSetId] = useState('');
-  const [rows, setRows] = useState<MetricRow[]>([]);
-  const [campaignOptions, setCampaignOptions] = useState<MetricRow[]>([]);
-  const [adSetOptions, setAdSetOptions] = useState<MetricRow[]>([]);
-  const [search, setSearch] = useState('');
+  const [campaignFilter, setCampaignFilter] = useState({ scopeKey: '', campaignId: '', adSetId: '' });
+  const campaignId = campaignFilter.scopeKey === scopeKey ? campaignFilter.campaignId : '';
+  const adSetId = campaignFilter.scopeKey === scopeKey ? campaignFilter.adSetId : '';
+  const setCampaignId = (value: string) => setCampaignFilter({ scopeKey, campaignId: value, adSetId: '' });
+  const setAdSetId = (value: string) => setCampaignFilter({ scopeKey, campaignId, adSetId: value });
+  const [storedRows, setRows] = useState<MetricRow[]>([]);
+  const [dataContext, setDataContext] = useState('');
+  const [storedCampaignOptions, setCampaignOptions] = useState<MetricRow[]>([]);
+  const [storedAdSetOptions, setAdSetOptions] = useState<MetricRow[]>([]);
+  const [search, setSearch] = useState(() => searchParams.get('busca') || '');
   const [status, setStatus] = useState('');
   const [sort, setSort] = useState('spend-desc');
-  const [selected, setSelected] = useState<MetricRow | null>(null);
+  const [selection, setSelection] = useState<{ scopeKey: string; row: MetricRow | null }>({ scopeKey: '', row: null });
+  const selected = selection.scopeKey === scopeKey ? selection.row : null;
+  const setSelected = (row: MetricRow | null) => setSelection({ scopeKey, row });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [breakdownType, setBreakdownType] = useState<'age'|'gender'|'region'|'publisher_platform'|'device_platform'|'platform_position'>('age');
-  const [breakdownRows, setBreakdownRows] = useState<BreakdownRow[]>([]);
+  const [storedBreakdownRows, setBreakdownRows] = useState<BreakdownRow[]>([]);
+  const [breakdownDataContext, setBreakdownDataContext] = useState('');
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -86,12 +94,24 @@ export default function CampaignsPro() {
   const [dailyBudget, setDailyBudget] = useState('');
   const [specialCategory, setSpecialCategory] = useState('');
 
+  useEffect(() => { setSearch(searchParams.get('busca') || ''); }, [searchParams]);
+
   const base = useMemo(() => ({
     clientId: scope.clientId,
     ...(scope.businessId ? { businessId: scope.businessId } : {}),
     ...(scope.adAccountId ? { adAccountId: scope.adAccountId } : {}),
     since, until,
   }), [scope.clientId, scope.businessId, scope.adAccountId, since, until]);
+  const contextKey = JSON.stringify([base, tab, campaignId, adSetId]);
+  const currentContext = useRef(contextKey);
+  currentContext.current = contextKey;
+  const rows = dataContext === contextKey ? storedRows : [];
+  const campaignOptions = dataContext === contextKey ? storedCampaignOptions : [];
+  const adSetOptions = dataContext === contextKey ? storedAdSetOptions : [];
+  const breakdownContext = JSON.stringify([contextKey, breakdownType]);
+  const currentBreakdownContext = useRef(breakdownContext);
+  currentBreakdownContext.current = breakdownContext;
+  const breakdownRows = breakdownDataContext === breakdownContext ? storedBreakdownRows : [];
 
   const createBusinesses = useMemo(
     () => scope.businesses.filter((item) => item.clientId === createClientId && item.status === 'active'),
@@ -148,22 +168,31 @@ export default function CampaignsPro() {
   async function loadOptions() {
     if (!scope.clientId) return;
     const campaignsResponse = await api.get('/performance/campaigns', { params: base });
+    if (currentContext.current !== contextKey) return [];
     const campaigns = Array.isArray(campaignsResponse.data?.data) ? campaignsResponse.data.data : [];
     setCampaignOptions(campaigns);
     if (campaignId) {
       const adsetsResponse = await api.get('/performance/adsets', { params: { ...base, campaignId } });
+      if (currentContext.current !== contextKey) return [];
       setAdSetOptions(Array.isArray(adsetsResponse.data?.data) ? adsetsResponse.data.data : []);
     } else setAdSetOptions([]);
+    return campaigns as MetricRow[];
   }
 
   async function load(forceLive = false) {
     if (!scope.clientId) return;
     setLoading(true); setError('');
     try {
-      await loadOptions();
+      const campaigns = await loadOptions();
+      if (currentContext.current !== contextKey) return;
       const endpoint = tab === 'campaigns' ? '/performance/campaigns' : tab === 'adsets' ? '/performance/adsets' : '/performance/ads';
-      const response = await api.get(endpoint, { params: { ...base, ...(campaignId ? { campaignId } : {}), ...(adSetId ? { adSetId } : {}) } });
-      let result: MetricRow[] = Array.isArray(response.data?.data) ? response.data.data : [];
+      let result: MetricRow[];
+      if (tab === 'campaigns') {
+        result = (campaigns || []).filter((row) => !campaignId || row.metaCampaignId === campaignId);
+      } else {
+        const response = await api.get(endpoint, { params: { ...base, ...(campaignId ? { campaignId } : {}), ...(adSetId ? { adSetId } : {}) } });
+        result = Array.isArray(response.data?.data) ? response.data.data : [];
+      }
       if (tab === 'campaigns') {
         try {
           const liveResponse = await api.get('/meta/live/campaigns', { params: { clientId: scope.clientId, ...(scope.businessId ? { businessId: scope.businessId } : {}), ...(scope.adAccountId ? { adAccountId: scope.adAccountId } : {}), force: forceLive ? 'true' : 'false' } });
@@ -175,10 +204,13 @@ export default function CampaignsPro() {
           });
         } catch { /* mantém o último status sincronizado se a Meta estiver temporariamente indisponível */ }
       }
+      if (currentContext.current !== contextKey) return;
       setRows(result);
+      setDataContext(contextKey);
     } catch (requestError: any) {
+      if (currentContext.current !== contextKey) return;
       setError(requestError?.response?.data?.error?.message || 'Não foi possível carregar campanhas e anúncios.');
-    } finally { setLoading(false); }
+    } finally { if (currentContext.current === contextKey) setLoading(false); }
   }
 
   useEffect(() => { void load(false); }, [tab, base.clientId, base.businessId, base.adAccountId, base.since, base.until, campaignId, adSetId]);
@@ -262,8 +294,10 @@ export default function CampaignsPro() {
     if (!scope.clientId) return;
     try {
       const response = await api.get('/performance/breakdowns', { params: { ...base, type: breakdownType, level: tab === 'campaigns' ? 'campaign' : tab === 'adsets' ? 'adset' : 'ad', ...(campaignId ? { campaignId } : {}), ...(adSetId ? { adSetId } : {}) } });
+      if (currentBreakdownContext.current !== breakdownContext) return;
       setBreakdownRows(Array.isArray(response.data?.data?.rows) ? response.data.data.rows : []);
-    } catch { setBreakdownRows([]); }
+      setBreakdownDataContext(breakdownContext);
+    } catch { if (currentBreakdownContext.current === breakdownContext) setBreakdownRows([]); }
   }
 
   useEffect(() => { void loadBreakdowns(); }, [breakdownType, tab, base.clientId, base.businessId, base.adAccountId, base.since, base.until, campaignId, adSetId]);

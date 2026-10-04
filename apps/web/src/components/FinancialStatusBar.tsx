@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Clock3, CreditCard, RefreshCw, WalletCards } from 'lucide-react';
 import { api } from '../api';
 import { useScope } from '../store';
@@ -54,11 +54,13 @@ function activityDetail(details?: Record<string, unknown> | null) {
 
 export default function FinancialStatusBar() {
   const scope = useScope();
-  const [data, setData] = useState<FinancialOverview | null>(null);
+  const [storedData, setData] = useState<FinancialOverview | null>(null);
+  const [dataContext, setDataContext] = useState('');
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [activityAccountId, setActivityAccountId] = useState('');
-  const [activities, setActivities] = useState<FinancialActivity[]>([]);
+  const [storedActivities, setActivities] = useState<FinancialActivity[]>([]);
+  const [activityContext, setActivityContext] = useState('');
   const [activityLoading, setActivityLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -67,6 +69,14 @@ export default function FinancialStatusBar() {
     ...(scope.businessId ? { businessId: scope.businessId } : {}),
     ...(scope.adAccountId ? { adAccountId: scope.adAccountId } : {}),
   }), [scope.clientId, scope.businessId, scope.adAccountId]);
+  const contextKey = JSON.stringify(params);
+  const currentContext = useRef(contextKey);
+  currentContext.current = contextKey;
+  const activityKey = JSON.stringify([contextKey, activityAccountId]);
+  const currentActivity = useRef(activityKey);
+  currentActivity.current = activityKey;
+  const data = dataContext === contextKey ? storedData : null;
+  const activities = activityContext === activityKey ? storedActivities : [];
 
   async function load(silent = false) {
     if (!scope.clientId) {
@@ -77,8 +87,10 @@ export default function FinancialStatusBar() {
     setError('');
     try {
       const response = await api.get('/financial/meta-overview', { params });
+      if (currentContext.current !== contextKey) return;
       const next = response.data?.data || null;
       setData(next);
+      setDataContext(contextKey);
       const accounts: FinancialAccount[] = Array.isArray(next?.accounts) ? next.accounts : [];
       setActivityAccountId((current) => {
         if (scope.adAccountId && accounts.some((item) => item.id === scope.adAccountId)) return scope.adAccountId;
@@ -86,14 +98,16 @@ export default function FinancialStatusBar() {
         return accounts[0]?.id || '';
       });
     } catch (requestError: any) {
+      if (currentContext.current !== contextKey) return;
       setError(requestError?.response?.data?.error?.message || 'Não foi possível consultar o saldo da Meta agora.');
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && currentContext.current === contextKey) setLoading(false);
     }
   }
 
   async function loadActivity(accountId = activityAccountId) {
     if (!scope.clientId || !accountId) return;
+    const requestActivityKey = JSON.stringify([contextKey, accountId]);
     setActivityLoading(true);
     try {
       const response = await api.get('/financial/meta-activity', {
@@ -103,17 +117,22 @@ export default function FinancialStatusBar() {
           adAccountId: accountId,
         },
       });
+      if (currentContext.current !== contextKey || currentActivity.current !== requestActivityKey) return;
       setActivities(Array.isArray(response.data?.data?.activities) ? response.data.data.activities : []);
+      setActivityContext(requestActivityKey);
     } catch (requestError: any) {
+      if (currentContext.current !== contextKey || currentActivity.current !== requestActivityKey) return;
       setActivities([]);
       setError(requestError?.response?.data?.error?.message || 'Não foi possível consultar o histórico financeiro da conta.');
     } finally {
-      setActivityLoading(false);
+      if (currentContext.current === contextKey && currentActivity.current === requestActivityKey) setActivityLoading(false);
     }
   }
 
   useEffect(() => {
     setActivities([]);
+    setActivityAccountId('');
+    setActivityLoading(false);
     void load();
     if (!scope.clientId) return;
     const timer = window.setInterval(() => { void load(true); }, 300_000);
@@ -121,8 +140,8 @@ export default function FinancialStatusBar() {
   }, [params.clientId, params.businessId, params.adAccountId]);
 
   useEffect(() => {
-    if (expanded && activityAccountId) void loadActivity(activityAccountId);
-  }, [expanded, activityAccountId]);
+    if (expanded && activityAccountId && dataContext === contextKey) void loadActivity(activityAccountId);
+  }, [expanded, activityAccountId, contextKey, dataContext]);
 
   if (!scope.clientId) return null;
 
